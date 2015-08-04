@@ -192,10 +192,10 @@ module Pod
         end
       end
 
-      if ref = reference_for_path(absolute_path)
+      if ref = reference_for_path(absolute_path.realpath)
         ref
       else
-        ref = group.new_file(absolute_path)
+        ref = group.new_file(absolute_path.realpath)
         @refs_by_absolute_path[absolute_path.to_s] = ref
       end
     end
