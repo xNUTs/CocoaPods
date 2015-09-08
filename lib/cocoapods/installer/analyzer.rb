@@ -292,9 +292,10 @@ module Pod
           pod_targets = distinct_targets.flat_map do |_, targets_by_distinctors|
             if targets_by_distinctors.count > 1
               # There are different sets of subspecs or the spec is used across different platforms
+              suffixes = scope_suffix_for_distinctor(targets_by_distinctors)
               targets_by_distinctors.map do |distinctor, target_definitions|
                 specs, _ = *distinctor
-                generate_pod_target(target_definitions, specs, :scoped => true)
+                generate_pod_target(target_definitions, specs, :scope_suffix => suffixes[distinctor])
               end
             else
               (specs, _), target_definitions = targets_by_distinctors.first
@@ -317,13 +318,52 @@ module Pod
           pod_targets = specs_by_target.flat_map do |target_definition, specs|
             grouped_specs = specs.group_by.group_by(&:root).values.uniq
             grouped_specs.flat_map do |pod_specs|
-              generate_pod_target([target_definition], pod_specs, :scoped => true)
+              generate_pod_target([target_definition], pod_specs, :scope_suffix => target_definition.label)
             end
           end
           pod_targets.each do |target|
             target.dependent_targets = transitive_dependencies_for_pod_target(target, pod_targets)
           end
         end
+      end
+
+      # Describes what makes pod targets configurations distinct among other.
+      #
+      # @param [(Array<Specification>, Platform) => TargetDefinition] targets_by_distinctors
+      #
+      # @return [(Array<Specification>, Platform) => String]
+      #
+      def scope_suffix_for_distinctor(targets_by_distinctors)
+        result = nil
+        all_spec_variants = targets_by_distinctors.keys.map { |k| k[0] }
+        all_platform_variants = targets_by_distinctors.keys.map { |k| k[1] }
+
+        if all_platform_variants.uniq.count == all_platform_variants.count
+          all_platform_name_variants = all_platform_variants.map(&:name)
+          if all_platform_name_variants.uniq.count == all_platform_name_variants.count
+            result = targets_by_distinctors.map { |d, _| [d, d[1].name.to_s] }
+          else
+            result = targets_by_distinctors.map { |d, _| [d, d[1].to_s] }
+          end
+        else
+          if all_spec_variants.uniq.count == all_spec_variants.count
+            common_specs = all_spec_variants.reduce(all_spec_variants, &:&)
+            result = targets_by_distinctors.map do |distinctor, _|
+              specs, _ = *distinctor
+              specs -= common_specs
+              [distinctor, specs.map { |spec| spec.name.split('/')[1..-1] }.join('-')]
+            end
+          else
+            result = targets_by_distinctors.map do |distinctor, target_definitions|
+              names = target_definitions.map do |target_definition|
+                target_definition.root? ? "Pods" : target_definition.name
+              end
+              [distinctor, names.join('-')]
+            end
+          end
+        end
+
+        Hash[result.map { |d,name| [d,name.gsub('/', '_')] }]
       end
 
       # Finds the names of the Pods upon which the given target _transitively_
@@ -364,13 +404,13 @@ module Pod
       # @param  [Array<Specification>] specs
       #         the specifications of an equal root.
       #
-      # @param  [Bool] scoped
-      #         whether the pod target should be scoped
+      # @param  [String] scope_suffix
+      #         @see PodTarget#scope_suffix
       #
       # @return [PodTarget]
       #
-      def generate_pod_target(target_definitions, pod_specs, scoped: false)
-        pod_target = PodTarget.new(pod_specs, target_definitions, sandbox, scoped)
+      def generate_pod_target(target_definitions, pod_specs, scope_suffix: nil)
+        pod_target = PodTarget.new(pod_specs, target_definitions, sandbox, scope_suffix)
 
         if config.integrate_targets?
           target_inspections = result.target_inspections.select { |t, _| target_definitions.include?(t) }.values

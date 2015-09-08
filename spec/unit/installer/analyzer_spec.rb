@@ -95,8 +95,8 @@ module Pod
         target.pod_targets.map(&:name).sort.should == [
           'JSONKit',
           'AFNetworking',
+          'libextobjc-EXTKeyPathCoding',
           'SVPullToRefresh',
-          'Pods-libextobjc',
         ].sort
         target.support_files_dir.should == config.sandbox.target_support_files_dir('Pods')
 
@@ -193,11 +193,11 @@ module Pod
           analyzer.analyze
 
           analyzer.analyze.targets.flat_map { |at| at.pod_targets.map { |pt| "#{at.name}/#{pt.name}" } }.sort.should == %w(
-            Pods/Pods-BananaLib
-            Pods/Pods-monkey
-            Pods-TestRunner/Pods-TestRunner-BananaLib
-            Pods-TestRunner/Pods-monkey
-            Pods-CLITool/Pods-CLITool-monkey
+            Pods/BananaLib-Pods
+            Pods/monkey-ios
+            Pods-TestRunner/BananaLib-TestRunner
+            Pods-TestRunner/monkey-ios
+            Pods-CLITool/monkey-osx
           ).sort
         end
       end
