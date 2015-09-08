@@ -225,8 +225,13 @@ module Pod
       #
       def generate_targets
         pod_targets = generate_pod_targets(result.specs_by_target)
-        result.specs_by_target.map do |target_definition, _|
+        aggregate_targets = result.specs_by_target.keys.reject(&:abstract?).map do |target_definition|
           generate_target(target_definition, pod_targets)
+        end
+        aggregate_targets.each do |target|
+          target.search_paths_aggregate_targets = aggregate_targets.select do |aggregate_target|
+            target.target_definition.targets_to_inherit_search_paths.include?(aggregate_target.target_definition)
+          end
         end
       end
 
@@ -246,6 +251,7 @@ module Pod
 
         if config.integrate_targets?
           target_inspection = result.target_inspections[target_definition]
+          raise "missing inspection: #{target_definition.name}" unless target_inspection
           target.user_project_path = target_inspection.project_path
           target.client_root = target.user_project_path.dirname
           target.user_target_uuids = target_inspection.project_target_uuids
@@ -658,6 +664,7 @@ module Pod
         inspection_result = {}
         UI.section 'Inspecting targets to integrate' do
           podfile.target_definition_list.each do |target_definition|
+            next if target_definition.abstract?
             inspector = TargetInspector.new(target_definition, config.installation_root)
             results = inspector.compute_results
             inspection_result[target_definition] = results
