@@ -8,6 +8,10 @@ To install release candidates run `[sudo] gem install cocoapods --pre`
 
 ##### Bug Fixes
 
+* Either generate just one pod target or generate it once for each target definition.  
+  [Marius Rackwitz](https://github.com/mrackwitz)
+  [#4034](https://github.com/CocoaPods/CocoaPods/issues/4034)
+
 * Using vendored frameworks without a `Headers` directory will no longer cause a
   crash.  
   [Samuel Giddins](https://github.com/segiddins)
