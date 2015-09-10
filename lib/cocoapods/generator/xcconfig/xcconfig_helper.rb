@@ -189,7 +189,7 @@ module Pod
             search_paths = xcconfig.attributes['FRAMEWORK_SEARCH_PATHS'] ||= ''
             search_paths_to_add = []
             search_paths_to_add << '$(inherited)'
-            if platform == :ios || platform == :watchos
+            if platform == :ios || platform == :watchos || platform == :tvos
               search_paths_to_add << '"$(SDKROOT)/Developer/Library/Frameworks"'
             else
               search_paths_to_add << '"$(DEVELOPER_LIBRARY_DIR)/Frameworks"'
