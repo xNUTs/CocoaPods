@@ -4,6 +4,15 @@ To install or update CocoaPods see this [guide](http://docs.cocoapods.org/guides
 
 To install release candidates run `[sudo] gem install cocoapods --pre`
 
+## Master
+
+##### Enhancements
+
+* Support for the new `tvos` platform.  
+  [Boris Bügling](https://github.com/neonichu)
+  [#4152](https://github.com/CocoaPods/CocoaPods/pull/4152)
+
+
 ## 0.39.0.beta.4 (2015-09-02)
 
 ##### Bug Fixes
