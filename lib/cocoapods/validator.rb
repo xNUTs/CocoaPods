@@ -612,6 +612,7 @@ module Pod
     def xcodebuild
       command = 'xcodebuild clean build -target Pods'
       command << ' CODE_SIGN_IDENTITY=- -sdk iphonesimulator' if consumer.platform_name == :ios
+      command << ' CODE_SIGN_IDENTITY=- -sdk appletvsimulator' if consumer.platform_name == :tvos
       output, status = _xcodebuild "#{command} 2>&1"
 
       unless status.success?
