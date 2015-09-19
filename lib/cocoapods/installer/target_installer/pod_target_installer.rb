@@ -51,9 +51,10 @@ module Pod
           settings['CURRENT_PROJECT_VERSION'] = project_version
           settings['DYLIB_COMPATIBILITY_VERSION'] = compatibility_version.to_s
           settings['DYLIB_CURRENT_VERSION'] = '$(CURRENT_PROJECT_VERSION)'
+        else
+          settings['PRIVATE_HEADERS_FOLDER_PATH'] = ''
+          settings['PUBLIC_HEADERS_FOLDER_PATH'] = ''
         end
-        settings['PRIVATE_HEADERS_FOLDER_PATH'] = ''
-        settings['PUBLIC_HEADERS_FOLDER_PATH'] = ''
         settings
       end
 
