@@ -20,10 +20,11 @@ module Pod
     require 'cocoapods/command/outdated'
     require 'cocoapods/command/project'
     require 'cocoapods/command/repo'
-    require 'cocoapods/command/search'
     require 'cocoapods/command/setup'
     require 'cocoapods/command/spec'
     require 'cocoapods/command/init'
+    require 'cocoapods/command/cache'
+    require 'cocoapods/command/env'
 
     self.abstract_command = true
     self.command = 'pod'
@@ -32,10 +33,11 @@ module Pod
     self.plugin_prefixes = %w(claide cocoapods)
 
     [Install, Update, Outdated, IPC::Podfile, IPC::Repl].each { |c| c.send(:include, ProjectDirectory) }
+    [Outdated].each { |c| c.send(:include, Project) }
 
     def self.options
       [
-        ['--silent',   'Show nothing'],
+        ['--silent', 'Show nothing'],
       ].concat(super)
     end
 
@@ -44,6 +46,7 @@ module Pod
       verify_xcode_license_approved!
 
       super(argv)
+    ensure
       UI.print_warnings
     end
 

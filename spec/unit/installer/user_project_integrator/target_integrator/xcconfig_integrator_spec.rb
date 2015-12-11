@@ -5,14 +5,14 @@ module Pod
     before do
       project_path = SpecHelper.create_sample_app_copy_from_fixture('SampleProject')
       @project = Xcodeproj::Project.open(project_path)
-      Xcodeproj::Project.new(config.sandbox.project_path).save
+      Project.new(config.sandbox.project_path).save
       @target = @project.targets.first
       target_definition = Podfile::TargetDefinition.new('Pods', nil)
       target_definition.link_with_first_target = true
       @pod_bundle = AggregateTarget.new(target_definition, config.sandbox)
-      @pod_bundle.user_project_path  = project_path
+      @pod_bundle.user_project = @project
       @pod_bundle.client_root = project_path.dirname
-      @pod_bundle.user_target_uuids  = [@target.uuid]
+      @pod_bundle.user_target_uuids = [@target.uuid]
       configuration = Xcodeproj::Config.new(
         'GCC_PREPROCESSOR_DEFINITIONS' => '$(inherited) COCOAPODS=1',
       )
@@ -104,6 +104,21 @@ module Pod
       end
 
       UI.warnings.should.not.match /not set.*base configuration/
+    end
+
+    it 'handles when xcconfig is set to another sandbox xcconfig' do
+      group = @project.new_group('Pods')
+      old_config = group.new_file('../Pods/Target Support Files/Pods/SampleConfig.xcconfig')
+      @target.build_configurations.each do |config|
+        config.base_configuration_reference = old_config
+      end
+      XCConfigIntegrator.integrate(@pod_bundle, [@target])
+      @target.build_configurations.each do |config|
+        config.base_configuration_reference.should.not == old_config
+        config.base_configuration_reference.path.should == @pod_bundle.xcconfig_relative_path(config.name)
+      end
+
+      UI.warnings.should.be.empty
     end
   end
 end

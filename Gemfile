@@ -11,17 +11,22 @@ source 'https://rubygems.org'
 gemspec
 
 # This is the version that ships with OS X 10.10, so be sure we test against it.
-gem 'json', '1.7.7'
+# At the same time, the 1.7.7 version won't install cleanly on Ruby > 2.2,
+# so we use a fork that makes a trivial change to a macro invocation.
+gem 'json', :git => 'https://github.com/segiddins/json.git', :branch => 'seg-1.7.7-ruby-2.2'
 
 group :development do
-  cp_gem 'claide',               'CLAide'
-  cp_gem 'cocoapods-core',       'Core'
-  cp_gem 'cocoapods-downloader', 'cocoapods-downloader'
-  cp_gem 'cocoapods-plugins',    'cocoapods-plugins'
-  cp_gem 'cocoapods-trunk',      'cocoapods-trunk'
-  cp_gem 'cocoapods-try',        'cocoapods-try'
-  cp_gem 'molinillo',            'Molinillo'
-  cp_gem 'xcodeproj',            'Xcodeproj'
+  cp_gem 'claide',                'CLAide'
+  cp_gem 'cocoapods-core',        'Core'
+  cp_gem 'cocoapods-deintegrate', 'cocoapods-deintegrate'
+  cp_gem 'cocoapods-downloader',  'cocoapods-downloader'
+  cp_gem 'cocoapods-plugins',     'cocoapods-plugins'
+  cp_gem 'cocoapods-search',      'cocoapods-search'
+  cp_gem 'cocoapods-stats',       'cocoapods-stats'
+  cp_gem 'cocoapods-trunk',       'cocoapods-trunk'
+  cp_gem 'cocoapods-try',         'cocoapods-try'
+  cp_gem 'molinillo',             'Molinillo'
+  cp_gem 'xcodeproj',             'Xcodeproj'
 
   gem 'cocoapods-dependencies'
 
@@ -34,6 +39,9 @@ group :development do
   # Integration tests
   gem 'diffy'
   gem 'clintegracon'
+
+  # Code Quality
+  gem 'inch_by_inch'
   gem 'rubocop'
 end
 
@@ -41,5 +49,5 @@ group :debugging do
   gem 'rb-fsevent'
   gem 'kicker'
   gem 'awesome_print'
-  gem 'ruby-prof'
+  gem 'ruby-prof', :platforms => [:ruby]
 end

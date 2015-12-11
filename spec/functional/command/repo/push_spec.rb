@@ -22,19 +22,35 @@ module Pod
     it "complains if it can't find a spec" do
       repo_make('test_repo')
       e = lambda { run_command('repo', 'push', 'test_repo') }.should.raise Pod::Informative
-      e.message.should.match(/Couldn't find any .podspec/)
+      e.message.should.match(/Couldn't find any podspec/)
+    end
+
+    it "complains if it can't find the given podspec" do
+      repo_make('test_repo')
+      e = lambda { run_command('repo', 'push', 'test_repo', 'testspec.podspec') }.should.raise Pod::Informative
+      e.message.should.match(/Couldn't find testspec\.podspec/)
     end
 
     it "it raises if the specification doesn't validate" do
       repo_make('test_repo')
       Dir.chdir(temporary_directory) do
         spec = "Spec.new do |s|; s.name = 'Broken'; s.version = '1.0' end"
-        File.open('Broken.podspec',  'w') { |f| f.write(spec) }
+        File.open('Broken.podspec', 'w') { |f| f.write(spec) }
         cmd = command('repo', 'push', 'test_repo')
         Validator.any_instance.stubs(:validated?).returns(false)
 
         e = lambda { cmd.run }.should.raise Pod::Informative
         e.message.should.match(/Broken.podspec.*does not validate/)
+      end
+    end
+
+    it 'finds JSON podspecs' do
+      repo_make('test_repo')
+
+      Dir.chdir(temporary_directory) do
+        File.open('JSON.podspec.json', 'w') { |f| f.write('{}') }
+        cmd = command('repo', 'push', 'test_repo')
+        cmd.send(:podspec_files).should == [Pathname('JSON.podspec.json')]
       end
     end
 
@@ -97,10 +113,24 @@ module Pod
       (@upstream + 'PushTest/1.4/PushTest.podspec').read.should.include('PushTest')
     end
 
-    before do
-      Installer.any_instance.stubs(:aggregate_targets).returns([])
-      Installer.any_instance.stubs(:install!)
+    it 'initializes with default sources if no custom sources specified' do
+      cmd = command('repo', 'push', 'master')
+      cmd.instance_variable_get(:@source_urls).should.equal [@upstream.to_s]
+    end
 
+    it 'initializes with custom sources if specified' do
+      cmd = command('repo', 'push', 'master', '--sources=test_repo2,test_repo1')
+      cmd.instance_variable_get(:@source_urls).should.equal %w(test_repo2 test_repo1)
+    end
+
+    before do
+      %i(prepare resolve_dependencies download_dependencies).each do |m|
+        Installer.any_instance.stubs(m)
+      end
+      Installer.any_instance.stubs(:aggregate_targets).returns([])
+      Installer.any_instance.stubs(:pod_targets).returns([])
+      Validator.any_instance.stubs(:install_pod)
+      Validator.any_instance.stubs(:add_app_project_import)
       Validator.any_instance.stubs(:check_file_patterns)
       Validator.any_instance.stubs(:validated?).returns(true)
       Validator.any_instance.stubs(:validate_url)
@@ -109,8 +139,10 @@ module Pod
     end
 
     it 'validates specs as frameworks by default' do
-      Validator.any_instance.expects(:podfile_from_spec).with(:ios, nil, true).times(3)
+      Validator.any_instance.expects(:podfile_from_spec).with(:ios, '8.0', true).times(3)
       Validator.any_instance.expects(:podfile_from_spec).with(:osx, nil, true).twice
+      Validator.any_instance.expects(:podfile_from_spec).with(:watchos, nil, true).twice
+      Validator.any_instance.expects(:podfile_from_spec).with(:tvos, nil, true).twice
 
       cmd = command('repo', 'push', 'master')
       Dir.chdir(temporary_directory) { cmd.run }
@@ -119,6 +151,8 @@ module Pod
     it 'validates specs as libraries if requested' do
       Validator.any_instance.expects(:podfile_from_spec).with(:ios, nil, false).times(3)
       Validator.any_instance.expects(:podfile_from_spec).with(:osx, nil, false).twice
+      Validator.any_instance.expects(:podfile_from_spec).with(:watchos, nil, false).twice
+      Validator.any_instance.expects(:podfile_from_spec).with(:tvos, nil, false).twice
 
       cmd = command('repo', 'push', 'master', '--use-libraries')
       Dir.chdir(temporary_directory) { cmd.run }

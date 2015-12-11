@@ -8,21 +8,23 @@ module Pod
       #
       attr_reader :sandbox
 
-      # @return [Array<PodTarget>] The libraries of the installation.
+      # @return [Array<PodTarget>] The pod targets of the installation.
       #
-      attr_reader :libraries
+      attr_reader :pod_targets
 
       # @return [Project] The Pods project.
       #
       attr_reader :pods_project
 
-      # @param [Sandbox] sandbox @see sandbox
-      # @param [Array<PodTarget>] libraries @see libraries
-      # @param [Project] libraries @see libraries
+      # Initialize a new instance
       #
-      def initialize(sandbox, libraries, pods_project)
+      # @param [Sandbox] sandbox @see sandbox
+      # @param [Array<PodTarget>] pod_targets @see pod_targets
+      # @param [Project] pods_project @see pod_project
+      #
+      def initialize(sandbox, pod_targets, pods_project)
         @sandbox = sandbox
-        @libraries = libraries
+        @pod_targets = pod_targets
         @pods_project = pods_project
       end
 
@@ -111,18 +113,30 @@ module Pod
       #
       def link_headers
         UI.message '- Linking headers' do
-          libraries.each do |library|
-            library.file_accessors.each do |file_accessor|
+          pod_targets.each do |pod_target|
+            pod_target.file_accessors.each do |file_accessor|
+              framework_exp = /\.framework\//
               headers_sandbox = Pathname.new(file_accessor.spec.root.name)
-              library.build_headers.add_search_path(headers_sandbox, library.platform)
-              sandbox.public_headers.add_search_path(headers_sandbox, library.platform)
 
-              header_mappings(headers_sandbox, file_accessor, file_accessor.headers).each do |namespaced_path, files|
-                library.build_headers.add_files(namespaced_path, files, library.platform)
+              # When integrating Pod as frameworks, built Pods are built into
+              # frameworks, whose headers are included inside the built
+              # framework. Those headers do not need to be linked from the
+              # sandbox.
+              unless pod_target.requires_frameworks? && pod_target.should_build?
+                pod_target.build_headers.add_search_path(headers_sandbox, pod_target.platform)
+                sandbox.public_headers.add_search_path(headers_sandbox, pod_target.platform)
+
+                header_mappings(headers_sandbox, file_accessor, file_accessor.headers).each do |namespaced_path, files|
+                  pod_target.build_headers.add_files(namespaced_path, files.reject { |f| f.to_path =~ framework_exp })
+                end
+
+                header_mappings(headers_sandbox, file_accessor, file_accessor.public_headers).each do |namespaced_path, files|
+                  sandbox.public_headers.add_files(namespaced_path, files.reject { |f| f.to_path =~ framework_exp })
+                end
               end
 
-              header_mappings(headers_sandbox, file_accessor, file_accessor.public_headers).each do |namespaced_path, files|
-                sandbox.public_headers.add_files(namespaced_path, files, library.platform)
+              vendored_frameworks_header_mappings(headers_sandbox, file_accessor).each do |namespaced_path, files|
+                sandbox.public_headers.add_files(namespaced_path, files)
               end
             end
           end
@@ -139,7 +153,7 @@ module Pod
       #         specs platform combinations.
       #
       def file_accessors
-        @file_accessors ||= libraries.map(&:file_accessors).flatten.compact
+        @file_accessors ||= pod_targets.map(&:file_accessors).flatten.compact
       end
 
       # Adds file references to the list of the paths returned by the file
@@ -153,7 +167,7 @@ module Pod
       #         The key of the group of the Pods project.
       #
       # @param  [Bool] reflect_file_system_structure_for_development
-      #         Wether organizing the a local pod's files in subgroups inside
+      #         Whether organizing a local pod's files in subgroups inside
       #         the pod's group is allowed.
       #
       # @return [void]
@@ -202,6 +216,36 @@ module Pod
           end
           mappings[sub_dir] ||= []
           mappings[sub_dir] << header
+        end
+        mappings
+      end
+
+      # Computes the destination sub-directory in the sandbox for headers
+      # from inside vendored frameworks.
+      #
+      # @param  [Pathname] headers_sandbox
+      #         The sandbox where the header links should be stored for this
+      #         Pod.
+      #
+      # @param  [Sandbox::FileAccessor] file_accessor
+      #         The consumer file accessor for which the headers need to be
+      #         linked.
+      #
+      def vendored_frameworks_header_mappings(headers_sandbox, file_accessor)
+        mappings = {}
+        file_accessor.vendored_frameworks.each do |framework|
+          headers_dir = Sandbox::FileAccessor.vendored_frameworks_headers_dir(framework)
+          headers = Sandbox::FileAccessor.vendored_frameworks_headers(framework)
+          framework_name = framework.basename(framework.extname)
+          dir = headers_sandbox + framework_name
+          headers.each do |header|
+            # the relative path of framework headers should be kept,
+            # not flattened like is done for most public headers.
+            relative_path = header.relative_path_from(headers_dir)
+            sub_dir = dir + relative_path.dirname
+            mappings[sub_dir] ||= []
+            mappings[sub_dir] << header
+          end
         end
         mappings
       end

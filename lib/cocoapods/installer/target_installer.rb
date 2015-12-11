@@ -39,14 +39,12 @@ module Pod
         product_type = target.product_type
         name = target.label
         platform = target.platform.name
-        deployment_target = target.platform.deployment_target.to_s
         language = target.uses_swift? ? :swift : :objc
         @native_target = project.new_target(product_type, name, platform, deployment_target, nil, language)
 
         product_name = target.product_name
         product = @native_target.product_reference
         product.name = product_name
-        product.path = product_name
 
         target.user_build_configurations.each do |bc_name, type|
           @native_target.add_build_configuration(bc_name, type)
@@ -59,6 +57,12 @@ module Pod
         target.native_target = @native_target
       end
 
+      # @return [String] The deployment target.
+      #
+      def deployment_target
+        target.platform.deployment_target.to_s
+      end
+
       # Returns the customized build settings which are overridden in the build
       # settings of the user target.
       #
@@ -67,7 +71,7 @@ module Pod
       def custom_build_settings
         settings = {}
 
-        if target.archs
+        unless target.archs.empty?
           settings['ARCHS'] = target.archs
         end
 
@@ -182,12 +186,6 @@ module Pod
       #
       def project
         sandbox.project
-      end
-
-      # @return [TargetDefinition] the target definition of the library.
-      #
-      def target_definition
-        target.target_definition
       end
 
       # @return [PBXGroup] the group where the file references to the support

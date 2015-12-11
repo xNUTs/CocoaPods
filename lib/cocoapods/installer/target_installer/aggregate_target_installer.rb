@@ -18,9 +18,8 @@ module Pod
             create_info_plist_file
             create_module_map
             create_umbrella_header
-            create_embed_frameworks_script
           end
-          create_target_environment_header
+          create_embed_frameworks_script
           create_bridge_support_file
           create_copy_resources_script
           create_acknowledgements
@@ -32,16 +31,24 @@ module Pod
 
       private
 
+      # @return [TargetDefinition] the target definition of the library.
+      #
+      def target_definition
+        target.target_definition
+      end
+
       # Ensure that vendored static frameworks and libraries are not linked
       # twice to the aggregate target, which shares the xcconfig of the user
       # target.
       #
       def custom_build_settings
         settings = {
-          'OTHER_LDFLAGS'      => '',
-          'OTHER_LIBTOOLFLAGS' => '',
-          'PODS_ROOT'          => '$(SRCROOT)',
-          'SKIP_INSTALL'       => 'YES',
+          'MACH_O_TYPE'               => 'staticlib',
+          'OTHER_LDFLAGS'             => '',
+          'OTHER_LIBTOOLFLAGS'        => '',
+          'PODS_ROOT'                 => '$(SRCROOT)',
+          'PRODUCT_BUNDLE_IDENTIFIER' => 'org.cocoapods.${PRODUCT_NAME:rfc1034identifier}',
+          'SKIP_INSTALL'              => 'YES',
         }
         super.merge(settings)
       end
@@ -73,16 +80,6 @@ module Pod
         end
       end
 
-      # Generates a header which allows to inspect at compile time the installed
-      # pods and the installed specifications of a pod.
-      #
-      def create_target_environment_header
-        path = target.target_environment_header_path
-        generator = Generator::TargetEnvironmentHeader.new(target.specs_by_build_configuration)
-        generator.save_as(path)
-        add_file_to_support_group(path)
-      end
-
       # Generates the bridge support metadata if requested by the {Podfile}.
       #
       # @note   The bridge support metadata is added to the resources of the
@@ -92,7 +89,7 @@ module Pod
       # @return [void]
       #
       def create_bridge_support_file
-        if target_definition.podfile.generate_bridge_support?
+        if target.podfile.generate_bridge_support?
           path = target.bridge_support_path
           headers = native_target.headers_build_phase.files.map { |bf| sandbox.root + bf.file_ref.path }
           generator = Generator::BridgeSupport.new(headers)
@@ -112,7 +109,7 @@ module Pod
         end
         resources_by_config = {}
         target.user_build_configurations.keys.each do |config|
-          file_accessors = library_targets.select { |t| t.include_in_build_config?(config) }.flat_map(&:file_accessors)
+          file_accessors = library_targets.select { |t| t.include_in_build_config?(target_definition, config) }.flat_map(&:file_accessors)
           resource_paths = file_accessors.flat_map { |accessor| accessor.resources.flat_map { |res| res.relative_path_from(project.path.dirname) } }
           resource_bundles = file_accessors.flat_map { |accessor| accessor.resource_bundles.keys.map { |name| "${BUILT_PRODUCTS_DIR}/#{name.shellescape}.bundle" } }
           resources_by_config[config] = (resource_paths + resource_bundles).uniq
@@ -149,11 +146,16 @@ module Pod
         path = target.embed_frameworks_script_path
         frameworks_by_config = {}
         target.user_build_configurations.keys.each do |config|
-          frameworks_by_config[config] = target.pod_targets.select do |pod_target|
-            pod_target.include_in_build_config?(config) && pod_target.should_build?
-          end.map(&:product_name)
+          relevant_pod_targets = target.pod_targets.select do |pod_target|
+            pod_target.include_in_build_config?(target_definition, config)
+          end
+          frameworks_by_config[config] = relevant_pod_targets.flat_map do |pod_target|
+            frameworks = pod_target.file_accessors.flat_map(&:vendored_dynamic_artifacts).map { |fw| "${PODS_ROOT}/#{fw.relative_path_from(sandbox.root)}" }
+            frameworks << "#{target_definition.label}/#{pod_target.product_name}" if pod_target.should_build? && pod_target.requires_frameworks?
+            frameworks
+          end
         end
-        generator = Generator::EmbedFrameworksScript.new(target_definition, frameworks_by_config)
+        generator = Generator::EmbedFrameworksScript.new(frameworks_by_config)
         generator.save_as(path)
         add_file_to_support_group(path)
       end

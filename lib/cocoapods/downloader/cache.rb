@@ -12,12 +12,14 @@ module Pod
       #
       attr_reader :root
 
+      # Initialize a new instance
+      #
       # @param  [Pathname,String] root
       #         see {#root}
       #
       def initialize(root)
         @root = Pathname(root)
-        @root.mkpath
+        ensure_matching_version
       end
 
       # Downloads the Pod from the given `request`
@@ -36,7 +38,53 @@ module Pod
         raise
       end
 
+      # @return [Hash<String, Hash<Symbol, String>>]
+      #         A hash whose keys are the pod name
+      #         And values are a hash with the following keys:
+      #         :spec_file : path to the spec file
+      #         :name      : name of the pod
+      #         :version   : pod version
+      #         :release   : boolean to tell if that's a release pod
+      #         :slug      : the slug path where the pod cache is located
+      #
+      def cache_descriptors_per_pod
+        specs_dir = root + 'Specs'
+        release_specs_dir = specs_dir + 'Release'
+        return {} unless specs_dir.exist?
+
+        spec_paths = specs_dir.find.select { |f| f.fnmatch('*.podspec.json') }
+        spec_paths.reduce({}) do |hash, spec_path|
+          spec = Specification.from_file(spec_path)
+          hash[spec.name] ||= []
+          is_release = spec_path.to_s.start_with?(release_specs_dir.to_s)
+          request = Downloader::Request.new(:spec => spec, :released => is_release)
+          hash[spec.name] << {
+            :spec_file => spec_path,
+            :name => spec.name,
+            :version => spec.version,
+            :release => is_release,
+            :slug => root + request.slug,
+          }
+          hash
+        end
+      end
+
       private
+
+      # Ensures the cache on disk was created with the same CocoaPods version as
+      # is currently running.
+      #
+      # @return [Void]
+      #
+      def ensure_matching_version
+        version_file = root + 'VERSION'
+        version = version_file.read.strip if version_file.file?
+
+        root.rmtree if version != Pod::VERSION && root.exist?
+        root.mkpath
+
+        version_file.open('w') { |f| f << Pod::VERSION }
+      end
 
       # @param  [Request] request
       #         the request to be downloaded.
@@ -74,9 +122,10 @@ module Pod
       #         was found in the download cache.
       #
       def cached_pod(request)
+        cached_spec = cached_spec(request)
         path = path_for_pod(request)
-        spec = request.spec || cached_spec(request)
-        return unless spec && path.directory?
+        return unless cached_spec && path.directory?
+        spec = request.spec || cached_spec
         Response.new(path, spec, request.params)
       end
 
@@ -89,6 +138,8 @@ module Pod
       def cached_spec(request)
         path = path_for_spec(request)
         path.file? && Specification.from_file(path)
+      rescue JSON::ParserError
+        nil
       end
 
       # @param  [Request] request
@@ -99,25 +150,15 @@ module Pod
       #
       def uncached_pod(request)
         in_tmpdir do |target|
-          result = Response.new
-          result.checkout_options = download(request.name, target, request.params, request.head?)
+          result, podspecs = download(request, target)
+          result.location = nil
 
-          if request.released_pod?
-            result.spec = request.spec
-            result.location = destination = path_for_pod(request, :params => result.checkout_options)
-            copy_and_clean(target, destination, request.spec)
-            write_spec(request.spec, path_for_spec(request, :params => result.checkout_options))
-          else
-            podspecs = Sandbox::PodspecFinder.new(target).podspecs
-            podspecs[request.name] = request.spec if request.spec
-            podspecs.each do |name, spec|
-              destination = path_for_pod(request, :name => name, :params => result.checkout_options)
-              copy_and_clean(target, destination, spec)
-              write_spec(spec, path_for_spec(request, :name => name, :params => result.checkout_options))
-              if request.name == name
-                result.location = destination
-                result.spec = spec
-              end
+          podspecs.each do |name, spec|
+            destination = path_for_pod(request, :name => name, :params => result.checkout_options)
+            copy_and_clean(target, destination, spec)
+            write_spec(spec, path_for_spec(request, :name => name, :params => result.checkout_options))
+            if request.name == name
+              result.location = destination
             end
           end
 
@@ -125,37 +166,8 @@ module Pod
         end
       end
 
-      # Downloads a pod with the given `name` and `params` to `target`.
-      #
-      # @param  [String] name
-      #
-      # @param  [Pathname] target
-      #
-      # @param  [Hash<Symbol,String>] params
-      #
-      # @param  [Boolean] head
-      #
-      # @return [Hash] The checkout options required to re-download this exact
-      #         same source.
-      #
-      def download(name, target, params, head)
-        downloader = Downloader.for_target(target, params)
-        if head
-          unless downloader.head_supported?
-            raise Informative, "The pod '#{name}' does not " \
-              "support the :head option, as it uses a #{downloader.name} " \
-              'source. Remove that option to use this pod.'
-          end
-          downloader.download_head
-        else
-          downloader.download
-        end
-
-        if downloader.options_specific? && !head
-          params
-        else
-          downloader.checkout_options
-        end
+      def download(request, target)
+        Downloader.download_request(request, target)
       end
 
       # Performs the given block inside a temporary directory,
@@ -167,7 +179,7 @@ module Pod
         tmpdir = Pathname(Dir.mktmpdir)
         blk.call(tmpdir)
       ensure
-        FileUtils.remove_entry(tmpdir) if tmpdir.exist?
+        FileUtils.remove_entry(tmpdir) if tmpdir && tmpdir.exist?
       end
 
       # Copies the `source` directory to `destination`, cleaning the directory
@@ -184,6 +196,7 @@ module Pod
       def copy_and_clean(source, destination, spec)
         specs_by_platform = group_subspecs_by_platform(spec)
         destination.parent.mkpath
+        FileUtils.rm_rf(destination)
         FileUtils.cp_r(source, destination)
         Pod::Installer::PodSourcePreparer.new(spec, destination).prepare!
         Sandbox::PodDirCleaner.new(destination, specs_by_platform).clean!

@@ -12,11 +12,13 @@ module Pod
       #         the target, which provides the product name
       attr_reader :target
 
+      # Initialize a new instance
+      #
       # @param  [Target] target
       #         @see target
       #
       def initialize(target)
-        super(target.target_definition.platform)
+        super(target.platform)
         @target = target
       end
 

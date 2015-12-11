@@ -15,10 +15,13 @@ module Pod
       #
       attr_accessor :root
 
+      # Initialize a new instance
+      #
       # @param  [Pathname] root The root of the PathList.
       #
       def initialize(root)
         @root = root
+        @glob_cache = {}
       end
 
       # @return [Array<String>] The list of absolute the path of all the files
@@ -46,13 +49,14 @@ module Pod
         end
         root_length  = root.to_s.length + 1
         escaped_root = escape_path_for_glob(root)
-        paths  = Dir.glob(escaped_root + '**/*', File::FNM_DOTMATCH)
+        paths = Dir.glob(escaped_root + '**/*', File::FNM_DOTMATCH)
         absolute_dirs  = paths.select { |path| File.directory?(path) }
         relative_dirs  = absolute_dirs.map  { |p| p[root_length..-1] }
         absolute_paths = paths.reject { |p| p == "#{root}/." || p == "#{root}/.." }
         relative_paths = absolute_paths.map { |p| p[root_length..-1] }
         @files = relative_paths - relative_dirs
         @dirs  = relative_dirs.map { |d| d.gsub(/\/\.\.?$/, '') }.reject { |d| d == '.' || d == '..' } .uniq
+        @glob_cache = {}
       end
 
       #-----------------------------------------------------------------------#
@@ -61,26 +65,47 @@ module Pod
 
       # @!group Globbing
 
-      # @return [Array<Pathname>] Similar to {glob} but returns the absolute
-      #         paths.
+      # Similar to {glob} but returns the absolute paths.
+      #
+      # @param  [String,Array<String>] patterns
+      #         @see #relative_glob
+      #
+      # @param  [Hash] options
+      #         @see #relative_glob
+      #
+      # @return [Array<Pathname>]
       #
       def glob(patterns, options = {})
         relative_glob(patterns, options).map { |p| root + p }
       end
 
-      # @return [Array<Pathname>] The list of relative paths that are case
-      #         insensitively matched by a given pattern. This method emulates
-      #         {Dir#glob} with the {File::FNM_CASEFOLD} option.
+      # The list of relative paths that are case insensitively matched by a
+      # given pattern. This method emulates {Dir#glob} with the
+      # {File::FNM_CASEFOLD} option.
       #
       # @param  [String,Array<String>] patterns
       #         A single {Dir#glob} like pattern, or a list of patterns.
       #
-      # @param  [String] dir_pattern
+      # @param  [Hash] options
+      #
+      # @option options [String] :dir_pattern
       #         An optional pattern to append to a pattern, if it is the path
       #         to a directory.
       #
+      # @option options [Array<String>] :exclude_patterns
+      #         Exclude specific paths given by those patterns.
+      #
+      # @option options [Array<String>] :include_dirs
+      #         Additional paths to take into account for matching.
+      #
+      # @return [Array<Pathname>]
+      #
       def relative_glob(patterns, options = {})
         return [] if patterns.empty?
+
+        cache_key = options.merge(:patterns => patterns)
+        cached_value = @glob_cache[cache_key]
+        return cached_value if cached_value
 
         dir_pattern = options[:dir_pattern]
         exclude_patterns = options[:exclude_patterns]
@@ -93,19 +118,15 @@ module Pod
         end
 
         list = Array(patterns).map do |pattern|
-          if pattern.is_a?(String)
-            if directory?(pattern) && dir_pattern
-              pattern += '/' unless pattern.end_with?('/')
-              pattern +=  dir_pattern
+          if directory?(pattern) && dir_pattern
+            pattern += '/' unless pattern.end_with?('/')
+            pattern += dir_pattern
+          end
+          expanded_patterns = dir_glob_equivalent_patterns(pattern)
+          full_list.select do |path|
+            expanded_patterns.any? do |p|
+              File.fnmatch(p, path, File::FNM_CASEFOLD | File::FNM_PATHNAME)
             end
-            expanded_patterns = dir_glob_equivalent_patterns(pattern)
-            full_list.select do |path|
-              expanded_patterns.any? do |p|
-                File.fnmatch(p, path, File::FNM_CASEFOLD | File::FNM_PATHNAME)
-              end
-            end
-          else
-            full_list.select { |path| path.match(pattern) }
           end
         end.flatten
 
@@ -114,7 +135,7 @@ module Pod
           exclude_options = { :dir_pattern => '**/*', :include_dirs => include_dirs }
           list -= relative_glob(exclude_patterns, exclude_options)
         end
-        list
+        @glob_cache[cache_key] = list
       end
 
       #-----------------------------------------------------------------------#

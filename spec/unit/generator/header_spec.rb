@@ -35,6 +35,16 @@ module Pod
       @gen.generate.should.include?('#import <Cocoa/Cocoa.h>')
     end
 
+    it 'imports Foundation for watchOS platforms' do
+      @gen.stubs(:platform).returns(Pod::Platform.watchos)
+      @gen.generate.should.include?('#import <Foundation/Foundation.h>')
+    end
+
+    it 'imports Foundation for tvOS platforms' do
+      @gen.stubs(:platform).returns(Pod::Platform.tvos)
+      @gen.generate.should.include?('#import <UIKit/UIKit.h>')
+    end
+
     it 'writes the header file to the disk' do
       path = temporary_directory + 'Test.h'
       @gen.save_as(path)

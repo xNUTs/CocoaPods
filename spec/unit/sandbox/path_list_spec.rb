@@ -16,6 +16,7 @@ module Pod
           Banana.modulemap
           BananaLib.podspec
           Bananalib.framework/Versions/A/Headers/Bananalib.h
+          Bananalib.framework/Versions/A/Headers/SubDir/SubBananalib.h
           Classes/Banana.h
           Classes/Banana.m
           Classes/BananaLib.pch
@@ -26,6 +27,7 @@ module Pod
           Resources/Images.xcassets/Logo.imageset/logo.png
           Resources/logo-sidebar.png
           Resources/sub_dir/logo-sidebar.png
+          framework/Source/MoreBanana.h
           libBananalib.a
           preserve_me.txt
           sub-dir/sub-dir-2/somefile.txt
@@ -45,12 +47,15 @@ module Pod
           Bananalib.framework/Versions
           Bananalib.framework/Versions/A
           Bananalib.framework/Versions/A/Headers
+          Bananalib.framework/Versions/A/Headers/SubDir
           Bananalib.framework/Versions/Current
           Classes
           Resources
           Resources/Images.xcassets
           Resources/Images.xcassets/Logo.imageset
           Resources/sub_dir
+          framework
+          framework/Source
           sub-dir
           sub-dir/sub-dir-2
         )
@@ -97,7 +102,7 @@ module Pod
       end
 
       it 'supports an optional pattern for globbing directories' do
-        paths = @path_list.relative_glob('Classes',  :dir_pattern => '*.{h,m}').map(&:to_s)
+        paths = @path_list.relative_glob('Classes', :dir_pattern => '*.{h,m}').map(&:to_s)
         paths.sort.should == %w(
           Classes/Banana.h
           Classes/Banana.m
@@ -106,7 +111,7 @@ module Pod
       end
 
       it 'handles directories specified with a trailing slash' do
-        paths = @path_list.relative_glob('Classes/',  :dir_pattern => '*.{h,m}').map(&:to_s)
+        paths = @path_list.relative_glob('Classes/', :dir_pattern => '*.{h,m}').map(&:to_s)
         paths.sort.should == %w(
           Classes/Banana.h
           Classes/Banana.m
@@ -116,7 +121,7 @@ module Pod
 
       it 'supports an optional list of patterns to exclude' do
         exclude_patterns = ['**/*.m', '**/*Private*.*']
-        paths = @path_list.relative_glob('Classes/*',  :exclude_patterns => exclude_patterns).map(&:to_s)
+        paths = @path_list.relative_glob('Classes/*', :exclude_patterns => exclude_patterns).map(&:to_s)
         paths.sort.should == %w(
           Classes/Banana.h
           Classes/BananaLib.pch
@@ -130,7 +135,7 @@ module Pod
       end
 
       it 'can optionally include the directories in the results' do
-        paths = @path_list.relative_glob('Resources/*',  :include_dirs => true).map(&:to_s)
+        paths = @path_list.relative_glob('Resources/*', :include_dirs => true).map(&:to_s)
         paths.sort.should == %w(
           Resources/Images.xcassets
           Resources/logo-sidebar.png
@@ -157,17 +162,17 @@ module Pod
       describe '#directory?' do
         it 'expands a pattern into all the combinations of Dir#glob literals' do
           patterns = @path_list.send(:dir_glob_equivalent_patterns, '{file1,file2}.{h,m}')
-          patterns.sort.should == %w(          file1.h file1.m file2.h file2.m          )
+          patterns.sort.should == %w( file1.h file1.m file2.h file2.m          )
         end
 
         it 'returns the original pattern if there are no Dir#glob expansions' do
           patterns = @path_list.send(:dir_glob_equivalent_patterns, 'file*.*')
-          patterns.sort.should == %w(          file*.*          )
+          patterns.sort.should == %w( file*.*          )
         end
 
         it 'expands `**`' do
           patterns = @path_list.send(:dir_glob_equivalent_patterns, 'Classes/**/file.m')
-          patterns.sort.should == %w(          Classes/**/file.m Classes/file.m          )
+          patterns.sort.should == %w( Classes/**/file.m Classes/file.m          )
         end
 
         it 'supports a combination of `**` and literals' do

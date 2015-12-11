@@ -21,14 +21,14 @@ module Pod
       relative_header_paths.each do |path|
         File.open(@sandbox.root + path, 'w') { |file| file.write('hello') }
       end
-      symlink_paths = @header_dir.add_files(namespace_path, relative_header_paths, :fake_platform)
+      symlink_paths = @header_dir.add_files(namespace_path, relative_header_paths)
       symlink_paths.each do |path|
         path.should.be.symlink
         File.read(path).should == 'hello'
       end
     end
 
-    it 'keeps a list of unique header search paths when headers are added' do
+    it 'does not add recursive search paths' do
       FileUtils.mkdir_p(@sandbox.root + 'ExampleLib/Dir')
       namespace_path = Pathname.new('ExampleLib')
       relative_header_paths = [
@@ -38,8 +38,8 @@ module Pod
       relative_header_paths.each do |path|
         File.open(@sandbox.root + path, 'w') { |file| file.write('hello') }
       end
-      @header_dir.add_files(namespace_path, relative_header_paths, :fake_platform)
-      @header_dir.search_paths(:fake_platform).should.include('${PODS_ROOT}/Headers/Public/ExampleLib')
+      @header_dir.add_files(namespace_path, relative_header_paths)
+      @header_dir.search_paths(:fake_platform).should.not.include('${PODS_ROOT}/Headers/Public/ExampleLib')
     end
 
     it 'always adds the Headers root to the header search paths' do
@@ -47,9 +47,9 @@ module Pod
     end
 
     it 'only exposes header search paths for the given platform' do
-      @header_dir.add_search_path('iOS Search Path', :ios)
-      @header_dir.add_search_path('OS X Search Path', :osx)
-      @header_dir.search_paths(:ios).sort.should == [
+      @header_dir.add_search_path('iOS Search Path', Platform.ios)
+      @header_dir.add_search_path('OS X Search Path', Platform.osx)
+      @header_dir.search_paths(Platform.ios).sort.should == [
         '${PODS_ROOT}/Headers/Public',
         '${PODS_ROOT}/Headers/Public/iOS Search Path',
       ]

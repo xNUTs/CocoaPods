@@ -1,3 +1,4 @@
+require 'tempfile'
 require 'fileutils'
 require 'active_support/core_ext/string/inflections'
 
@@ -20,17 +21,29 @@ module Pod
         ]
 
         def self.options
-          [['--allow-warnings', 'Allows pushing even if there are warnings'],
-           ['--use-libraries', 'Linter uses static libraries to install the spec'],
-           ['--local-only', 'Does not perform the step of pushing REPO to its remote']].concat(super)
+          [
+            ['--allow-warnings', 'Allows pushing even if there are warnings'],
+            ['--use-libraries', 'Linter uses static libraries to install the spec'],
+            ['--sources=https://github.com/artsy/Specs,master', 'The sources from which to pull dependent pods ' \
+             '(defaults to all available repos). ' \
+             'Multiple sources must be comma-delimited.'],
+            ['--local-only', 'Does not perform the step of pushing REPO to its remote'],
+            ['--no-private', 'Lint includes checks that apply only to public repos'],
+            ['--commit-message="Fix bug in pod"', 'Add custom commit message. ' \
+            'Opens default editor if no commit message is specified.'],
+          ].concat(super)
         end
 
         def initialize(argv)
           @allow_warnings = argv.flag?('allow-warnings')
           @local_only = argv.flag?('local-only')
           @repo = argv.shift_argument
+          @source_urls = argv.option('sources', SourcesManager.all.map(&:url).join(',')).split(',')
           @podspec = argv.shift_argument
           @use_frameworks = !argv.flag?('use-libraries')
+          @private = argv.flag?('private', true)
+          @message = argv.option('commit-message')
+          @commit_message = argv.flag?('commit-message', false)
           super
         end
 
@@ -40,6 +53,7 @@ module Pod
         end
 
         def run
+          open_editor if @commit_message && @message.nil?
           check_if_master_repo
           validate_podspec_files
           check_repo_status
@@ -56,6 +70,19 @@ module Pod
 
         extend Executable
         executable :git
+
+        # Open default editor to allow users to enter commit message
+        #
+        def open_editor
+          return if ENV['EDITOR'].nil?
+
+          file = Tempfile.new('cocoapods')
+          File.chmod(0777, file.path)
+          file.close
+
+          system("#{ENV['EDITOR']} #{file.path}")
+          @message = File.read file.path
+        end
 
         # Temporary check to ensure that users do not push accidentally private
         # specs to the master repo.
@@ -84,9 +111,10 @@ module Pod
         def validate_podspec_files
           UI.puts "\nValidating #{'spec'.pluralize(count)}".yellow
           podspec_files.each do |podspec|
-            validator = Validator.new(podspec, SourcesManager.all.map(&:url))
+            validator = Validator.new(podspec, @source_urls)
             validator.allow_warnings = @allow_warnings
             validator.use_frameworks = @use_frameworks
+            validator.ignore_public_only_results = @private
             begin
               validator.validate
             rescue => e
@@ -134,7 +162,9 @@ module Pod
           podspec_files.each do |spec_file|
             spec = Pod::Specification.from_file(spec_file)
             output_path = File.join(repo_dir, spec.name, spec.version.to_s)
-            if Pathname.new(output_path).exist?
+            if @message && !@message.empty?
+              message = @message
+            elsif Pathname.new(output_path).exist?
               message = "[Fix] #{spec}"
             elsif Pathname.new(File.join(repo_dir, spec.name)).exist?
               message = "[Update] #{spec}"
@@ -190,9 +220,15 @@ module Pod
         # @return [Array<Pathname>] The path of the specifications to push.
         #
         def podspec_files
-          files = Pathname.glob(@podspec || '*.podspec')
-          raise Informative, "Couldn't find any .podspec file in current directory" if files.empty?
-          files
+          if @podspec
+            path = Pathname(@podspec)
+            raise Informative, "Couldn't find #{@podspec}" unless path.exist?
+            [path]
+          else
+            files = Pathname.glob('*.podspec{,.json}')
+            raise Informative, "Couldn't find any podspec files in current directory" if files.empty?
+            files
+          end
         end
 
         # @return [Integer] The number of the podspec files to push.

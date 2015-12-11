@@ -22,11 +22,15 @@ module Pod
           create_xcconfig_file
           if target.requires_frameworks?
             create_info_plist_file
-            create_module_map do |generator|
-              generator.private_headers += target.file_accessors.flat_map(&:private_headers).map(&:basename)
-            end
+            create_module_map
             create_umbrella_header do |generator|
-              generator.imports += target.file_accessors.flat_map(&:public_headers).map(&:basename)
+              if header_mappings_dir
+                generator.imports += target.file_accessors.flat_map(&:public_headers).map do |pathname|
+                  pathname.relative_path_from(header_mappings_dir)
+                end
+              else
+                generator.imports += target.file_accessors.flat_map(&:public_headers).map(&:basename)
+              end
             end
           end
           create_prefix_header
@@ -35,6 +39,20 @@ module Pod
       end
 
       private
+
+      # Remove the default headers folder path settings for static library pod
+      # targets.
+      #
+      # @return [Hash{String => String}]
+      #
+      def custom_build_settings
+        settings = super
+        unless target.requires_frameworks?
+          settings['PRIVATE_HEADERS_FOLDER_PATH'] = ''
+          settings['PUBLIC_HEADERS_FOLDER_PATH'] = ''
+        end
+        settings
+      end
 
       #-----------------------------------------------------------------------#
 
@@ -69,17 +87,7 @@ module Pod
 
           header_file_refs = headers.map { |sf| project.reference_for_path(sf) }
           native_target.add_file_references(header_file_refs) do |build_file|
-            # Set added headers as public if needed
-            if target.requires_frameworks?
-              build_file.settings ||= {}
-              if public_headers.include?(build_file.file_ref.real_path)
-                build_file.settings['ATTRIBUTES'] = ['Public']
-              elsif private_headers.include?(build_file.file_ref.real_path)
-                build_file.settings['ATTRIBUTES'] = ['Private']
-              else
-                build_file.settings['ATTRIBUTES'] = ['Project']
-              end
-            end
+            add_header(build_file, public_headers, private_headers)
           end
 
           other_file_refs = other_source_files.map { |sf| project.reference_for_path(sf) }
@@ -108,6 +116,7 @@ module Pod
             file_references = paths.map { |sf| project.reference_for_path(sf) }
             label = target.resources_bundle_target_label(bundle_name)
             bundle_target = project.new_resources_bundle(label, file_accessor.spec_consumer.platform_name)
+            bundle_target.deployment_target = deployment_target
             bundle_target.product_reference.tap do |bundle_product|
               bundle_file_name = "#{bundle_name}.bundle"
               bundle_product.name = bundle_file_name
@@ -128,9 +137,19 @@ module Pod
               end
             end
 
+            # Create Info.plist file for bundle
+            path = target.info_plist_path
+            path.dirname.mkdir unless path.dirname.exist?
+            info_plist_path = path.dirname + "ResourceBundle-#{bundle_name}-#{path.basename}"
+            generator = Generator::InfoPlistFile.new(target)
+            generator.save_as(info_plist_path)
+            add_file_to_support_group(info_plist_path)
+
             bundle_target.build_configurations.each do |c|
               c.build_settings['PRODUCT_NAME'] = bundle_name
-              if target.requires_frameworks?
+              relative_info_plist_path = info_plist_path.relative_path_from(sandbox.root)
+              c.build_settings['INFOPLIST_FILE'] = relative_info_plist_path.to_s
+              if target.requires_frameworks? && target.scoped?
                 c.build_settings['CONFIGURATION_BUILD_DIR'] = target.configuration_build_dir
               end
             end
@@ -144,13 +163,8 @@ module Pod
       #
       def create_xcconfig_file
         path = target.xcconfig_path
-        public_gen = Generator::XCConfig::PublicPodXCConfig.new(target)
-        public_gen.save_as(path)
-        add_file_to_support_group(path)
-
-        path = target.xcconfig_private_path
-        private_gen = Generator::XCConfig::PrivatePodXCConfig.new(target, public_gen.xcconfig)
-        private_gen.save_as(path)
+        xcconfig_gen = Generator::XCConfig::PodXCConfig.new(target)
+        xcconfig_gen.save_as(path)
         xcconfig_file_ref = add_file_to_support_group(path)
 
         native_target.build_configurations.each do |c|
@@ -174,7 +188,6 @@ module Pod
       def create_prefix_header
         path = target.prefix_header_path
         generator = Generator::PrefixHeader.new(target.file_accessors, target.platform)
-        generator.imports << target.target_environment_header_path.basename
         generator.save_as(path)
         add_file_to_support_group(path)
 
@@ -187,6 +200,8 @@ module Pod
       ENABLE_OBJECT_USE_OBJC_FROM = {
         :ios => Version.new('6'),
         :osx => Version.new('10.8'),
+        :watchos => Version.new('2.0'),
+        :tvos => Version.new('9.0'),
       }
 
       # Returns the compiler flags for the source files of the given specification.
@@ -235,8 +250,8 @@ module Pod
             flags << '-DOS_OBJECT_USE_OBJC=0'
           end
         end
-        if target_definition.inhibits_warnings_for_pod?(consumer.spec.root.name)
-          flags << '-w -Xanalyzer -analyzer-disable-checker -Xanalyzer deadcode'
+        if target.inhibit_warnings?
+          flags << '-w -Xanalyzer -analyzer-disable-all-checks'
         end
         flags * ' '
       end
@@ -256,16 +271,57 @@ module Pod
       end
 
       def create_module_map
-        return super unless module_map = target.file_accessors.first.module_map
+        return super unless custom_module_map
         path = target.module_map_path
         UI.message "- Copying module map file to #{UI.path(path)}" do
-          FileUtils.cp(module_map, path)
+          FileUtils.cp(custom_module_map, path)
           add_file_to_support_group(path)
 
           native_target.build_configurations.each do |c|
             relative_path = path.relative_path_from(sandbox.root)
             c.build_settings['MODULEMAP_FILE'] = relative_path.to_s
           end
+        end
+      end
+
+      def create_umbrella_header
+        return super unless custom_module_map
+      end
+
+      def custom_module_map
+        @custom_module_map ||= target.file_accessors.first.module_map
+      end
+
+      def header_mappings_dir
+        return @header_mappings_dir if defined?(@header_mappings_dir)
+        file_accessor = target.file_accessors.first
+        @header_mappings_dir = if dir = file_accessor.spec_consumer.header_mappings_dir
+                                 file_accessor.path_list.root + dir
+                               end
+      end
+
+      def add_header(build_file, public_headers, private_headers)
+        file_ref = build_file.file_ref
+        acl = if public_headers.include?(file_ref.real_path)
+                'Public'
+              elsif private_headers.include?(file_ref.real_path)
+                'Private'
+              else
+                'Project'
+              end
+
+        if target.requires_frameworks? && header_mappings_dir
+          relative_path = file_ref.real_path.relative_path_from(header_mappings_dir)
+          sub_dir = relative_path.dirname
+          copy_phase_name = "Copy #{sub_dir} #{acl} Headers"
+          copy_phase = native_target.copy_files_build_phases.find { |bp| bp.name == copy_phase_name } ||
+            native_target.new_copy_files_build_phase(copy_phase_name)
+          copy_phase.symbol_dst_subfolder_spec = :products_directory
+          copy_phase.dst_path = "$(#{acl.upcase}_HEADERS_FOLDER_PATH)/#{sub_dir}"
+          copy_phase.add_file_reference(file_ref, true)
+        else
+          build_file.settings ||= {}
+          build_file.settings['ATTRIBUTES'] = [acl]
         end
       end
 

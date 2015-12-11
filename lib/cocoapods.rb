@@ -40,6 +40,7 @@ module Pod
 
   autoload :AggregateTarget,           'cocoapods/target/aggregate_target'
   autoload :Command,                   'cocoapods/command'
+  autoload :Deintegrator,              'cocoapods_deintegrate'
   autoload :Executable,                'cocoapods/executable'
   autoload :ExternalSources,           'cocoapods/external_sources'
   autoload :Installer,                 'cocoapods/installer'
@@ -64,18 +65,7 @@ module Pod
     autoload :InfoPlistFile,           'cocoapods/generator/info_plist_file'
     autoload :ModuleMap,               'cocoapods/generator/module_map'
     autoload :PrefixHeader,            'cocoapods/generator/prefix_header'
-    autoload :TargetEnvironmentHeader, 'cocoapods/generator/target_environment_header'
     autoload :UmbrellaHeader,          'cocoapods/generator/umbrella_header'
     autoload :XCConfig,                'cocoapods/generator/xcconfig'
   end
-
-  module Hooks
-    autoload :InstallerRepresentation, 'cocoapods/hooks/installer_representation'
-    autoload :LibraryRepresentation,   'cocoapods/hooks/library_representation'
-    autoload :PodRepresentation,       'cocoapods/hooks/pod_representation'
-  end
-end
-
-if ENV['COCOA_PODS_ENV'] == 'development'
-  # require 'awesome_print'
 end

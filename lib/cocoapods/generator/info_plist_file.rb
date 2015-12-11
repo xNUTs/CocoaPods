@@ -9,6 +9,8 @@ module Pod
       #
       attr_reader :target
 
+      # Initialize a new instance
+      #
       # @param  [Target] target @see target
       #
       def initialize(target)
@@ -37,7 +39,8 @@ module Pod
       #
       def target_version
         if target && target.respond_to?(:root_spec)
-          target.root_spec.version.to_s
+          version = target.root_spec.version
+          [version.major, version.minor, version.patch].join('.')
         else
           '1.0.0'
         end
@@ -48,20 +51,35 @@ module Pod
       # @return [String]
       #
       def generate
-        FILE_CONTENTS.sub('${CURRENT_PROJECT_VERSION_STRING}', target_version)
+        header + dict + footer
       end
 
-      FILE_CONTENTS = <<-EOS
+      private
+
+      def header
+        <<-PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+        PLIST
+      end
+
+      def footer
+        <<-PLIST
+</dict>
+</plist>
+        PLIST
+      end
+
+      def dict
+        dict = <<-PLIST
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
   <string>${EXECUTABLE_NAME}</string>
   <key>CFBundleIdentifier</key>
-  <string>org.cocoapods.${PRODUCT_NAME:rfc1034identifier}</string>
+  <string>${PRODUCT_BUNDLE_IDENTIFIER}</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
@@ -69,16 +87,26 @@ module Pod
   <key>CFBundlePackageType</key>
   <string>FMWK</string>
   <key>CFBundleShortVersionString</key>
-  <string>${CURRENT_PROJECT_VERSION_STRING}</string>
+  <string>#{target_version}</string>
   <key>CFBundleSignature</key>
   <string>????</string>
   <key>CFBundleVersion</key>
   <string>${CURRENT_PROJECT_VERSION}</string>
   <key>NSPrincipalClass</key>
   <string></string>
-</dict>
-</plist>
-      EOS
+        PLIST
+
+        if target.platform.name == :tvos
+          dict << <<-PLIST
+  <key>UIRequiredDeviceCapabilities</key>
+  <array>
+    <string>arm64</string>
+  </array>
+          PLIST
+        end
+
+        dict
+      end
     end
   end
 end

@@ -53,6 +53,25 @@ module Pod
         SourcesManager.all.map(&:name).should == %w(master test_repo)
       end
 
+      it 'includes all sources in an aggregate for a dependency if no source is specified' do
+        dependency = Dependency.new('JSONKit', '1.4')
+        aggregate = SourcesManager.aggregate_for_dependency(dependency)
+        aggregate.sources.map(&:name).should == %w(master test_repo)
+      end
+
+      it 'includes only the one source in an aggregate for a dependency if a source is specified' do
+        repo_url = 'https://url/to/specs.git'
+        dependency = Dependency.new('JSONKit', '1.4', :source => repo_url)
+
+        source = mock
+        source.stubs(:name).returns('repo')
+
+        SourcesManager.expects(:source_with_url).with(repo_url).returns(source)
+
+        aggregate = SourcesManager.aggregate_for_dependency(dependency)
+        aggregate.sources.map(&:name).should == [source.name]
+      end
+
       it 'searches for the set of a dependency' do
         set = SourcesManager.search(Dependency.new('BananaLib'))
         set.class.should == Specification::Set
@@ -67,36 +86,77 @@ module Pod
       it 'searches sets by name' do
         sets = SourcesManager.search_by_name('BananaLib')
         sets.all? { |s| s.class == Specification::Set }.should.be.true
-        sets.any? { |s| s.name  == 'BananaLib' }.should.be.true
+        sets.any? { |s| s.name == 'BananaLib' }.should.be.true
       end
 
       it 'can perform a full text search of the sets' do
         SourcesManager.stubs(:all).returns([@test_source])
         sets = SourcesManager.search_by_name('Chunky', true)
         sets.all? { |s| s.class == Specification::Set }.should.be.true
-        sets.any? { |s| s.name  == 'BananaLib' }.should.be.true
+        sets.any? { |s| s.name == 'BananaLib' }.should.be.true
       end
 
       it 'can perform a full text regexp search of the sets' do
         SourcesManager.stubs(:all).returns([@test_source])
         sets = SourcesManager.search_by_name('Ch[aeiou]nky', true)
         sets.all? { |s| s.class == Specification::Set }.should.be.true
-        sets.any? { |s| s.name  == 'BananaLib' }.should.be.true
+        sets.any? { |s| s.name == 'BananaLib' }.should.be.true
       end
 
-      it "generates the search index before performing a search if it doesn't exits" do
-        SourcesManager.stubs(:all).returns([@test_source])
-        Source::Aggregate.any_instance.expects(:generate_search_index).returns('BananaLib' => {})
-        Source::Aggregate.any_instance.expects(:update_search_index).never
-        SourcesManager.updated_search_index = nil
-        SourcesManager.search_by_name('BananaLib', true)
+      describe 'Sorting algorithm' do
+        before do
+          @test_search_results = %w(HockeyKit DLSuit VCLReachability NPReachability AVReachability PYNetwork
+                                    SCNetworkReachability AFNetworking Networking).map do |name|
+            Specification::Set.new(name)
+          end
+        end
+
+        it 'puts pod with exact match at the first index while sorting' do
+          regexps = [/networking/i]
+          sets = SourcesManager.sorted_sets(@test_search_results, regexps)
+          sets[0].name.should == 'Networking'
+        end
+
+        it 'puts pod with less prefix length before pods with more prefix length in search results' do
+          regexps = [/reachability/i]
+          sets = SourcesManager.sorted_sets(@test_search_results, regexps)
+          sets.index { |s| s.name == 'AVReachability' }.should.be < sets.index { |s| s.name == 'VCLReachability' }
+        end
+
+        it 'puts pod with more query word match before pods with less match in multi word query search results' do
+          regexps = [/network/i, /reachability/i]
+          sets = SourcesManager.sorted_sets(@test_search_results, regexps)
+          sets.index { |s| s.name == 'SCNetworkReachability' }.should.be < sets.index { |s| s.name == 'AVReachability' }
+        end
+
+        it 'puts pod matching first query word before pods matching later words in multi word query search results' do
+          regexps = [/network/i, /reachability/i]
+          sets = SourcesManager.sorted_sets(@test_search_results, regexps)
+          sets.index { |s| s.name == 'PYNetwork' }.should.be < sets.index { |s| s.name == 'AVReachability' }
+        end
+
+        it 'puts pod matching first query word before pods matching later words in multi word query search results' do
+          regexps = [/network/i, /reachability/i]
+          sets = SourcesManager.sorted_sets(@test_search_results, regexps)
+          sets.index { |s| s.name == 'PYNetwork' }.should.be < sets.index { |s| s.name == 'AVReachability' }
+        end
+
+        it 'alphabetically sorts pods having exact other conditions' do
+          regexps = [/reachability/i]
+          sets = SourcesManager.sorted_sets(@test_search_results, regexps)
+          sets.index { |s| s.name == 'AVReachability' }.should.be < sets.index { |s| s.name == 'NPReachability' }
+        end
+
+        it 'alphabetically sorts pods whose names does not match query' do
+          regexps = [/reachability/i]
+          sets = SourcesManager.sorted_sets(@test_search_results, regexps)
+          sets.index { |s| s.name == 'DLSuit' }.should.be < sets.index { |s| s.name == 'HockeyKit' }
+        end
       end
 
-      it 'updates the search index before performing a search if it exits' do
-        File.open(SourcesManager.search_index_path, 'w') { |file| file.write("---\nBananaLib:\n  version: 0.0.1") }
+      it "generates the search index before performing a search if it doesn't exist" do
         SourcesManager.stubs(:all).returns([@test_source])
-        Source::Aggregate.any_instance.expects(:generate_search_index).never
-        Source::Aggregate.any_instance.expects(:update_search_index).returns('BananaLib' => {})
+        Source::Aggregate.any_instance.expects(:generate_search_index_for_source).with(@test_source).returns('BananaLib' => ['BananaLib'])
         SourcesManager.updated_search_index = nil
         SourcesManager.search_by_name('BananaLib', true)
       end
@@ -105,7 +165,7 @@ module Pod
         SourcesManager.unstub(:search_index_path)
         config.cache_root = Config::DEFAULTS[:cache_root]
         path = SourcesManager.search_index_path.to_s
-        path.should.match %r{Library/Caches/CocoaPods/search_index.yaml}
+        path.should.match %r{Library/Caches/CocoaPods/search_index.json}
       end
 
       describe 'managing sources by URL' do
@@ -235,15 +295,17 @@ module Pod
     describe 'Updating Sources' do
       extend SpecHelper::TemporaryRepos
 
-      it 'update source backed by a git repository' do
+      it 'updates source backed by a git repository' do
         set_up_test_repo_for_update
+        SourcesManager.expects(:update_search_index_if_needed_in_background).with({}).returns(nil)
         SourcesManager.update(test_repo_path.basename.to_s, true)
         UI.output.should.match /is up to date/
       end
 
       it 'uses the only fast forward git option' do
         set_up_test_repo_for_update
-        SourcesManager.expects(:git!).with { |options| options.should.include? '--ff-only' }
+        Source.any_instance.expects(:git!).with { |options| options.should.include? '--ff-only' }
+        SourcesManager.expects(:update_search_index_if_needed_in_background).with({}).returns(nil)
         SourcesManager.update(test_repo_path.basename.to_s, true)
       end
 
@@ -251,10 +313,34 @@ module Pod
         UI.warnings = ''
         set_up_test_repo_for_update
         Dir.chdir(test_repo_path) do
-          `git remote set-url origin https://example.com`
+          `git remote set-url origin file:///dev/null`
         end
+        SourcesManager.expects(:update_search_index_if_needed_in_background).with({}).returns(nil)
         SourcesManager.update(test_repo_path.basename.to_s, true)
         UI.warnings.should.include('not able to update the `master` repo')
+      end
+
+      it 'updates search index for changed paths if source is updated' do
+        prev_index = { @test_source.name => {} }
+        SourcesManager.expects(:stored_search_index).returns(prev_index)
+
+        SourcesManager.expects(:save_search_index).with do |value|
+          value[@test_source.name]['BananaLib'].should.include(:BananaLib)
+          value[@test_source.name]['JSONKit'].should.include(:JSONKit)
+        end
+        changed_paths = { @test_source => %w(BananaLib/1.0/BananaLib.podspec JSONKit/1.4/JSONKit.podspec) }
+        SourcesManager.update_search_index_if_needed(changed_paths)
+      end
+
+      it 'does not update search index if it does not contain source even if there are changes in source' do
+        prev_index = {}
+        SourcesManager.expects(:stored_search_index).returns(prev_index)
+
+        SourcesManager.expects(:save_search_index).with do |value|
+          value[@test_source.name].should.be.nil
+        end
+        changed_paths = { @test_source => %w(BananaLib/1.0/BananaLib.podspec JSONKit/1.4/JSONKit.podspec) }
+        SourcesManager.update_search_index_if_needed(changed_paths)
       end
 
       it 'returns whether a source is backed by a git repo' do
@@ -266,6 +352,12 @@ module Pod
         SourcesManager.stubs(:version_information).returns('last' => '999.0')
         SourcesManager.check_version_information(temporary_directory)
         UI.output.should.match /CocoaPods 999.0 is available/
+      end
+
+      it 'recommends the user to use the latest stable version' do
+        SourcesManager.stubs(:version_information).returns('last' => '999.0')
+        SourcesManager.check_version_information(temporary_directory)
+        UI.output.should.match /We strongly recommend that you use the/
       end
 
       it 'skips the update message if the user disabled the notification' do

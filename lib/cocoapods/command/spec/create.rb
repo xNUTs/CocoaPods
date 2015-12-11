@@ -15,7 +15,8 @@ module Pod
         ]
 
         def initialize(argv)
-          @name_or_url, @url = argv.shift_argument, argv.shift_argument
+          @name_or_url = argv.shift_argument
+          @url = argv.shift_argument
           super
         end
 
@@ -59,7 +60,7 @@ module Pod
           data[:author_email]  = `git config --get user.email`.strip
           data[:source_url]    = "http://EXAMPLE/#{name}.git"
           data[:ref_type]      = ':tag'
-          data[:ref]           = '0.0.1'
+          data[:ref]           = '#{s.version}'
           data
         end
 
@@ -73,7 +74,7 @@ module Pod
           data[:name]          = repo['name']
           data[:summary]       = (repo['description'] || '').gsub(/["]/, '\"')
           data[:homepage]      = (repo['homepage'] && !repo['homepage'].empty?) ? repo['homepage'] : repo['html_url']
-          data[:author_name]   = user['name']  || user['login']
+          data[:author_name]   = user['name'] || user['login']
           data[:author_email]  = user['email'] || 'email@address.com'
           data[:source_url]    = repo['clone_url']
 
@@ -99,6 +100,8 @@ module Pod
           else
             data[:ref_type] = ':tag'
             data[:ref]      = versions_tags[version]
+            data[:ref]      = '#{s.version}' if "#{version}" == versions_tags[version]
+            data[:ref]      = 'v#{s.version}' if "v#{version}" == versions_tags[version]
           end
           data
         end
@@ -126,13 +129,12 @@ Pod::Spec.new do |s|
   s.version      = "#{data[:version]}"
   s.summary      = "#{data[:summary]}"
 
+  # This description is used to generate tags and improve search results.
+  #   * Think: What does it do? Why did you write it? What is the focus?
+  #   * Try to keep it short, snappy and to the point.
+  #   * Write the description between the DESC delimiters below.
+  #   * Finally, don't worry about the indent, CocoaPods strips it!
   s.description  = <<-DESC
-                   A longer description of #{data[:name]} in Markdown format.
-
-                   * Think: Why did you write this? What is the focus? What does it do?
-                   * CocoaPods will be using this to generate tags, and improve search results.
-                   * Try to keep it short, snappy and to the point.
-                   * Finally, don't worry about the indent, CocoaPods strips it!
                    DESC
 
   s.homepage     = "#{data[:homepage]}"
@@ -177,6 +179,8 @@ Pod::Spec.new do |s|
   #  When using multiple platforms
   # s.ios.deployment_target = "5.0"
   # s.osx.deployment_target = "10.7"
+  # s.watchos.deployment_target = "2.0"
+  # s.tvos.deployment_target = "9.0"
 
 
   # ――― Source Location ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #

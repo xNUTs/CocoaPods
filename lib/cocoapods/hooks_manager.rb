@@ -1,4 +1,4 @@
-require 'rubygems'
+require 'active_support/core_ext/hash/indifferent_access'
 
 module Pod
   # Provides support for the hook system of CocoaPods. The system is designed
@@ -34,6 +34,8 @@ module Pod
       #
       attr_reader :block
 
+      # Initialize a new instance
+      #
       # @param  [String] name        @see {#name}.
       #
       # @param  [String] plugin_name @see {#plugin_name}.
@@ -103,14 +105,16 @@ module Pod
         if registrations
           hooks = registrations[name]
           if hooks
-            UI.message "- Running #{name.to_s.gsub('_', ' ')} hooks" do
+            UI.message "- Running #{name.to_s.tr('_', ' ')} hooks" do
               hooks.each do |hook|
                 next if whitelisted_plugins && !whitelisted_plugins.key?(hook.plugin_name)
                 UI.message "- #{hook.plugin_name || 'unknown plugin'} from " \
                            "`#{hook.block.source_location.first}`" do
                   block = hook.block
                   if block.arity > 1
-                    block.call(context, whitelisted_plugins[hook.plugin_name])
+                    user_options = whitelisted_plugins[hook.plugin_name]
+                    user_options = user_options.with_indifferent_access if user_options
+                    block.call(context, user_options)
                   else
                     block.call(context)
                   end

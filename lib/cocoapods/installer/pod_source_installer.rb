@@ -8,7 +8,7 @@ module Pod
     # @note This class needs to consider all the activated specs of a Pod.
     #
     class PodSourceInstaller
-      # @return [Sandbox]
+      # @return [Sandbox] The installation target.
       #
       attr_reader :sandbox
 
@@ -17,6 +17,8 @@ module Pod
       #
       attr_reader :specs_by_platform
 
+      # Initialize a new instance
+      #
       # @param [Sandbox] sandbox @see sandbox
       # @param [Hash{Symbol=>Array}] specs_by_platform @see specs_by_platform
       #
@@ -29,6 +31,12 @@ module Pod
       #
       def inspect
         "<#{self.class} sandbox=#{sandbox.root} pod=#{root_spec.name}"
+      end
+
+      # @return [String] The name of the pod this installer is installing.
+      #
+      def name
+        root_spec.name
       end
 
       #-----------------------------------------------------------------------#
@@ -44,7 +52,6 @@ module Pod
       def install!
         download_source unless predownloaded? || local?
         PodSourcePreparer.new(root_spec, root).prepare! if local?
-        lock_files!
       end
 
       # Cleans the installations if appropriate.
@@ -58,7 +65,35 @@ module Pod
         clean_installation unless local?
       end
 
-      # @return [Hash]
+      # Locks the source files if appropriate.
+      #
+      # @todo   As the pre install hooks need to run before cleaning this
+      #         method should be refactored.
+      #
+      # @return [void]
+      #
+      def lock_files!(file_accessors)
+        return if local?
+        each_source_file(file_accessors) do |source_file|
+          FileUtils.chmod('u-w', source_file)
+        end
+      end
+
+      # Unlocks the source files if appropriate.
+      #
+      # @todo   As the pre install hooks need to run before cleaning this
+      #         method should be refactored.
+      #
+      # @return [void]
+      #
+      def unlock_files!(file_accessors)
+        return if local?
+        each_source_file(file_accessors) do |source_file|
+          FileUtils.chmod('u+w', source_file)
+        end
+      end
+
+      # @return [Hash] @see Downloader#checkout_options
       #
       attr_reader :specific_source
 
@@ -88,25 +123,6 @@ module Pod
           :released => released?,
           :head => head_pod?,
         )
-      end
-
-      # Locks all of the files in this pod (source, license, etc). This will
-      # cause Xcode to warn you if you try to accidently edit one of the files.
-      #
-      # @return [void]
-      #
-      def lock_files!
-        if local?
-          return
-        end
-
-        # We don't want to lock diretories, as that forces you to override
-        # those permissions if you decide to delete the Pods folder.
-        Dir.glob(root + '**/*').each do |file|
-          unless File.directory?(file)
-            File.chmod(0444, file)
-          end
-        end
       end
 
       # Removes all the files not needed for the installation according to the
@@ -164,6 +180,15 @@ module Pod
 
       def released?
         !local? && !head_pod? && !predownloaded? && sandbox.specification(root_spec.name) != root_spec
+      end
+
+      def each_source_file(file_accessors, &blk)
+        file_accessors.each do |file_accessor|
+          file_accessor.source_files.each do |source_file|
+            next unless source_file.exist?
+            blk[source_file]
+          end
+        end
       end
 
       #-----------------------------------------------------------------------#

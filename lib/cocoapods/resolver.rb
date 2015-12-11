@@ -25,6 +25,8 @@ module Pod
     #
     attr_accessor :sources
 
+    # Init a new Resolver
+    #
     # @param  [Sandbox] sandbox @see sandbox
     # @param  [Podfile] podfile @see podfile
     # @param  [Array<Dependency>] locked_dependencies @see locked_dependencies
@@ -35,6 +37,8 @@ module Pod
       @podfile = podfile
       @locked_dependencies = locked_dependencies
       @sources = Array(sources)
+      @platforms_by_dependency = Hash.new { |h, k| h[k] = [] }
+      @cached_sets = {}
     end
 
     #-------------------------------------------------------------------------#
@@ -50,10 +54,17 @@ module Pod
     #         definition.
     #
     def resolve
-      dependencies = podfile.target_definition_list.map(&:dependencies).flatten
-      @cached_sets = {}
+      dependencies = podfile.target_definition_list.flat_map do |target|
+        target.dependencies.each do |dep|
+          @platforms_by_dependency[dep].push(target.platform).uniq!
+        end
+      end
       @activated = Molinillo::Resolver.new(self, self).resolve(dependencies, locked_dependencies)
-      specs_by_target
+      specs_by_target.tap do |specs_by_target|
+        specs_by_target.values.flatten.each do |spec|
+          sandbox.store_head_pod(spec.name) if spec.version.head?
+        end
+      end
     rescue Molinillo::ResolverError => e
       handle_resolver_error(e)
     end
@@ -64,24 +75,18 @@ module Pod
     # @note   The returned specifications can be subspecs.
     #
     def specs_by_target
-      @specs_by_target ||= begin
-        specs_by_target = {}
+      @specs_by_target ||= {}.tap do |specs_by_target|
         podfile.target_definition_list.each do |target|
-          specs = target.dependencies.map(&:name).map do |name|
+          specs = target.dependencies.map(&:name).flat_map do |name|
             node = @activated.vertex_named(name)
             valid_dependencies_for_target_from_node(target, node) << node
           end
 
           specs_by_target[target] = specs.
-            flatten.
             map(&:payload).
             uniq.
-            sort_by(&:name).
-            each do |spec|
-              sandbox.store_head_pod(spec.name) if spec.version.head?
-            end
+            sort_by(&:name)
         end
-        specs_by_target
       end
     end
 
@@ -169,7 +174,7 @@ module Pod
     #
     def requirement_satisfied_by?(requirement, activated, spec)
       existing_vertices = activated.vertices.values.select do |v|
-        Specification.root_name(v.name) ==  requirement.root_name
+        Specification.root_name(v.name) == requirement.root_name
       end
       existing = existing_vertices.map(&:payload).compact.first
       requirement_satisfied =
@@ -181,7 +186,7 @@ module Pod
       requirement_satisfied && !(
         spec.version.prerelease? &&
         existing_vertices.flat_map(&:requirements).none? { |r| r.prerelease? || r.external_source || r.head? }
-      )
+      ) && spec_is_platform_compatible?(activated, requirement, spec)
     end
 
     # Sort dependencies so that the ones that are easiest to resolve are first.
@@ -230,8 +235,7 @@ module Pod
 
     # Called before resolution starts.
     #
-    # Completely silence this, as we show nothing in normal mode and debug
-    # information in verbose mode.
+    # Completely silence this, as we show nothing.
     #
     # @return [Void]
     #
@@ -240,8 +244,7 @@ module Pod
 
     # Called after resolution ends.
     #
-    # Completely silence this, as we show nothing in normal mode and debug
-    # information in verbose mode.
+    # Completely silence this, as we show nothing.
     #
     # @return [Void]
     #
@@ -250,21 +253,11 @@ module Pod
 
     # Called during resolution to indicate progress.
     #
-    # Completely silence this, as we show nothing in normal mode and debug
-    # information in verbose mode.
+    # Completely silence this, as we show nothing.
     #
     # @return [Void]
     #
     def indicate_progress
-    end
-
-    # Conveys debug information to the user.
-    # By default, prints to `STDERR` instead of {#output}.
-    #
-    # @param [Integer] depth the current depth of the resolution process.
-    # @return [void]
-    def debug?
-      Config.instance.verbose?
     end
 
     #-------------------------------------------------------------------------#
@@ -342,13 +335,17 @@ module Pod
     #         The dependency for which the set is needed.
     #
     def create_set_from_sources(dependency)
-      aggregate.search(dependency)
+      aggregate_for_dependency(dependency).search(dependency)
     end
 
     # @return [Source::Aggregate] The aggregate of the {#sources}.
     #
-    def aggregate
-      @aggregate ||= Source::Aggregate.new(sources.map(&:repo))
+    def aggregate_for_dependency(dependency)
+      if dependency && dependency.podspec_repo
+        return SourcesManager.aggregate_for_dependency(dependency)
+      else
+        @aggregate ||= Source::Aggregate.new(sources.map(&:repo))
+      end
     end
 
     # Ensures that a specification is compatible with the platform of a target.
@@ -377,22 +374,73 @@ module Pod
     # @param  [Molinillo::ResolverError] error
     #
     def handle_resolver_error(error)
+      message = error.message
       case error
       when Molinillo::VersionConflict
         error.conflicts.each do |name, conflict|
           lockfile_reqs = conflict.requirements[name_for_locking_dependency_source]
           if lockfile_reqs && lockfile_reqs.last && lockfile_reqs.last.prerelease? && !conflict.existing
-            raise Informative, 'Due to the previous naïve CocoaPods resolver, ' \
+            message = 'Due to the previous naïve CocoaPods resolver, ' \
               "you were using a pre-release version of `#{name}`, " \
               'without explicitly asking for a pre-release version, which now leads to a conflict. ' \
               'Please decide to either use that pre-release version by adding the ' \
               'version requirement to your Podfile ' \
               "(e.g. `pod '#{name}', '#{lockfile_reqs.map(&:requirement).join("', '")}'`) " \
               "or revert to a stable version by running `pod update #{name}`."
+          elsif (conflict.possibility && conflict.possibility.version.prerelease?) &&
+              (conflict.requirement && !(
+              conflict.requirement.prerelease? ||
+              conflict.requirement.external_source ||
+              conflict.requirement.head?)
+              )
+            # Conflict was caused by not specifying an explicit version for the requirement #[name],
+            # and there is no available stable version satisfying constraints for the requirement.
+            message = "There are only pre-release versions available satisfying the following requirements:\n"
+            conflict.requirements.values.flatten.each do |r|
+              unless search_for(r).empty?
+                message << "\n\t'#{name}', '#{r.requirement}'\n"
+              end
+            end
+            message << "\nYou should explicitly specify the version in order to install a pre-release version"
+          elsif !conflict.existing
+            conflict.requirements.values.flatten.each do |r|
+              if search_for(r).empty?
+                # There is no existing specification inside any of the spec repos with given requirements.
+                message << "\n\nNone of the spec sources contain a spec satisfying the `#{r}` dependency." \
+                  "\nYou have either; mistyped the name or version," \
+                  ' not added the source repo that hosts the Podspec to your Podfile,' \
+                  ' or not got the latest versions of your source repos.'
+              else
+                message << "\n\nSpecs satisfying the `#{r}` dependency were found, " \
+                  'but they required a higher minimum deployment target.'
+              end
+            end
           end
         end
       end
-      raise Informative, error.message
+      raise Informative, message
+    end
+
+    # Returns whether the given spec is platform-compatible with the dependency
+    # graph, taking into account the dependency that has required the spec.
+    #
+    # @param  [Molinillo::DependencyGraph] dependency_graph
+    #
+    # @param  [Dependency] dependency
+    #
+    # @param  [Specification] specification
+    #
+    # @return [Bool]
+    def spec_is_platform_compatible?(dependency_graph, dependency, spec)
+      vertex = dependency_graph.vertex_named(dependency.name)
+      predecessors = vertex.recursive_predecessors.select(&:root)
+      predecessors << vertex if vertex.root?
+      platforms_to_satisfy = predecessors.flat_map(&:explicit_requirements).flat_map { |r| @platforms_by_dependency[r] }
+
+      platforms_to_satisfy.all? do |platform_to_satisfy|
+        spec.available_platforms.select { |spec_platform| spec_platform.name == platform_to_satisfy.name }.
+          all? { |spec_platform| platform_to_satisfy.supports?(spec_platform) }
+      end
     end
 
     # Returns the target-appropriate nodes that are `successors` of `node`,
@@ -420,9 +468,7 @@ module Pod
     def edge_is_valid_for_target?(edge, target)
       dependencies_for_target_platform =
         edge.origin.payload.all_dependencies(target.platform).map(&:name)
-      edge.requirements.any? do |dependency|
-        dependencies_for_target_platform.include?(dependency.name)
-      end
+      dependencies_for_target_platform.include?(edge.requirement.name)
     end
   end
 end

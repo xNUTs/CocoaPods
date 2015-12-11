@@ -65,7 +65,7 @@ module Pod
         end
 
         should.not.raise do
-          @hooks_manager.run(:post_install, Object.new,  'plugin2' => {})
+          @hooks_manager.run(:post_install, Object.new, 'plugin2' => {})
         end
       end
 
@@ -75,8 +75,21 @@ module Pod
         end
 
         should.not.raise do
-          @hooks_manager.run(:post_install, Object.new,  'plugin' => { 'key' => 'value' })
+          @hooks_manager.run(:post_install, Object.new, 'plugin' => { 'key' => 'value' })
         end
+      end
+
+      it 'passes along user-specified options as hashes with indifferent access' do
+        run_count = 0
+        @hooks_manager.register('plugin', :post_install) do |_options, user_options|
+          user_options['key'].should == 'value'
+          user_options[:key].should == 'value'
+          run_count += 1
+        end
+
+        @hooks_manager.run(:post_install, Object.new, 'plugin' => { 'key' => 'value' })
+        @hooks_manager.run(:post_install, Object.new, 'plugin' => { :key => 'value' })
+        run_count.should == 2
       end
 
       it 'raises if no name is given' do

@@ -47,8 +47,15 @@ require 'bundler/setup'
 require 'pretty_bacon'
 require 'colored'
 require 'clintegracon'
+require 'fileutils'
+require 'integration/file_tree'
 require 'integration/xcodeproj_project_yaml'
 require 'tmpdir'
+
+if (developer_bin = `xcode-select -p 2>/dev/null`.strip) && $?.success?
+  developer_bin = Pathname(developer_bin) + 'usr/bin'
+  ENV['PATH'] = "#{developer_bin}#{File::PATH_SEPARATOR}#{ENV['PATH']}"
+end
 
 CLIntegracon.configure do |c|
   c.spec_path = ROOT + 'spec/cocoapods-integration-specs'
@@ -62,6 +69,12 @@ CLIntegracon.configure do |c|
     File.open("#{path}.yaml", 'w') do |file|
       file.write xcodeproj.to_yaml
     end
+  end
+
+  c.transform_produced '**/*.framework' do |path|
+    tree = FileTree.to_tree(path)
+    FileUtils.rm_rf path
+    File.open(path, 'w') { |f| f << tree }
   end
 
   # Register special handling for YAML files
@@ -101,6 +114,7 @@ describe_cli 'pod' do
       'COCOAPODS_SKIP_CACHE'     => 'TRUE',
       'XCODEPROJ_DISABLE_XCPROJ' => 'TRUE',
       'CLAIDE_DISABLE_AUTO_WRAP' => 'TRUE',
+      'COCOAPODS_DISABLE_STATS'  => 'TRUE',
     }
     s.default_args = [
       '--verbose',
@@ -109,10 +123,29 @@ describe_cli 'pod' do
     s.replace_path ROOT.to_s, 'ROOT'
     s.replace_path `which git`.chomp, 'GIT_BIN'
     s.replace_path `which hg`.chomp, 'HG_BIN' if has_mercurial
+    s.replace_path `which bash`.chomp, 'BASH_BIN'
+    s.replace_path `which curl`.chomp, 'CURL_BIN'
     s.replace_user_path 'Library/Caches/CocoaPods', 'CACHES_DIR'
-    s.replace_pattern /#{Dir.tmpdir}\/[\w-]+/i, 'TMPDIR'
+    s.replace_pattern /#{Dir.tmpdir}\/[\w-]+/io, 'TMPDIR'
     s.replace_pattern /\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [-+]\d{4}/, '<#DATE#>'
     s.replace_pattern /\(Took \d+.\d+ seconds\)/, '(Took <#DURATION#> seconds)'
+
+    # This was changed in a very recent git version
+    s.replace_pattern /git checkout -b <new-branch-name>/, 'git checkout -b new_branch_name'
+
+    s.replace_path %r{
+      `[^`]*? # The opening backtick on a plugin path
+      ([[[:alnum:]]_+-]+?) # The plugin name
+      (- ([[:xdigit:]]+ | #{Gem::Version::VERSION_PATTERN}))? # The version or SHA
+      /lib/cocoapods_plugin.rb # The actual plugin file that gets loaded
+    }iox, '`\1/lib/cocoapods_plugin.rb'
+
+    s.replace_pattern %r{
+      ^(\s* \$ \s (CURL_BIN | #{`which curl`.strip}) .* \n)
+      ^\s* % \s* Total .* \n
+      ^\s* Dload \s* Upload .* \n
+      (^\s* [[:cntrl:]] .* \n)+
+    }iox, "\\1\n"
   end
 
   describe 'Pod install' do
@@ -212,6 +245,13 @@ describe_cli 'pod' do
     describe 'Integrates a Pod using non Objective-C source files' do
       behaves_like cli_spec 'install_non_objective_c_files',
                             'install --no-repo-update'
+    end
+
+    describe 'Integrates a Pod using a dynamic vendored framework' do
+      # We have to disable verbose mode by adding --no-verbose here,
+      # otherwise curl output is included in execution output.
+      behaves_like cli_spec 'install_vendored_dynamic_framework',
+                            'install --no-repo-update --no-verbose'
     end
 
     # @todo add tests for all the hooks API

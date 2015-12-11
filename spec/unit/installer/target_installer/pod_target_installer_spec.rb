@@ -6,7 +6,7 @@ module Pod
       before do
         config.sandbox.prepare
         @podfile = Podfile.new do
-          platform :ios
+          platform :ios, '6.0'
           xcodeproj 'dummy'
         end
         @target_definition = @podfile.target_definitions['Pods']
@@ -25,8 +25,7 @@ module Pod
           @project.add_file_reference(resource, group)
         end
 
-        @pod_target = PodTarget.new([@spec], @target_definition, config.sandbox)
-        @pod_target.stubs(:platform).returns(Platform.new(:ios, '6.0'))
+        @pod_target = PodTarget.new([@spec], [@target_definition], config.sandbox)
         @pod_target.file_accessors = [file_accessor]
         @pod_target.user_build_configurations = { 'Debug' => :debug, 'Release' => :release }
         @installer = Installer::PodTargetInstaller.new(config.sandbox, @pod_target)
@@ -34,47 +33,44 @@ module Pod
         @spec.prefix_header_contents = '#import "BlocksKit.h"'
       end
 
-      it 'adds file references for the support files of the target' do
-        @installer.install!
-        @project.support_files_group
-        group = @project['Pods/BananaLib/Support Files']
-        group.children.map(&:display_name).sort.should == [
-          'Pods-BananaLib-Private.xcconfig',
-          'Pods-BananaLib-dummy.m',
-          'Pods-BananaLib-prefix.pch',
-          'Pods-BananaLib.xcconfig',
-        ]
-      end
-
-      #--------------------------------------#
-
-      it 'adds the target for the static library to the project' do
-        @installer.install!
-        @project.targets.count.should == 1
-        @project.targets.first.name.should == 'Pods-BananaLib'
+      it 'uses the maximum of all spec deployment targets' do
+        spec_1 = Pod::Specification.new { |s| s.ios.deployment_target = '10.10' }
+        spec_2 = Pod::Specification.new { |s| s.ios.deployment_target = '10.9' }
+        spec_3 = Pod::Specification.new
+        @pod_target.stubs(:specs).returns([spec_1, spec_2, spec_3])
+        @installer.send(:deployment_target).should == '10.10'
       end
 
       it 'sets the platform and the deployment target for iOS targets' do
         @installer.install!
         target = @project.targets.first
         target.platform_name.should == :ios
-        target.deployment_target.should == '6.0'
-        target.build_settings('Debug')['IPHONEOS_DEPLOYMENT_TARGET'].should == '6.0'
+        target.deployment_target.should == '4.3'
+        target.build_settings('Debug')['IPHONEOS_DEPLOYMENT_TARGET'].should == '4.3'
+      end
+
+      it 'sets the platform and the deployment target for iOS targets that require frameworks' do
+        @pod_target.stubs(:requires_frameworks?).returns(true)
+        @installer.install!
+        target = @project.targets.first
+        target.platform_name.should == :ios
+        target.deployment_target.should == '8.0'
+        target.build_settings('Debug')['IPHONEOS_DEPLOYMENT_TARGET'].should == '8.0'
       end
 
       it 'sets the platform and the deployment target for OS X targets' do
-        @pod_target.stubs(:platform).returns(Platform.new(:osx, '10.8'))
+        @pod_target.target_definitions.first.stubs(:platform).returns(Platform.new(:osx, '10.8'))
         @installer.install!
         target = @project.targets.first
         target.platform_name.should == :osx
-        target.deployment_target.should == '10.8'
-        target.build_settings('Debug')['MACOSX_DEPLOYMENT_TARGET'].should == '10.8'
+        target.deployment_target.should == '10.6'
+        target.build_settings('Debug')['MACOSX_DEPLOYMENT_TARGET'].should == '10.6'
       end
 
       it "adds the user's build configurations to the target" do
         @pod_target.user_build_configurations.merge!('AppStore' => :release, 'Test' => :debug)
         @installer.install!
-        @project.targets.first.build_configurations.map(&:name).sort.should == %w(        AppStore Debug Release Test        )
+        @project.targets.first.build_configurations.map(&:name).sort.should == %w( AppStore Debug Release Test        )
       end
 
       it 'it creates different hash instances for the build settings of various build configurations' do
@@ -92,6 +88,27 @@ module Pod
 
       #--------------------------------------#
 
+      describe 'headers folder paths' do
+        it 'does not set them for framework targets' do
+          @pod_target.stubs(:requires_frameworks? => true)
+          @installer.install!
+          @project.targets.first.build_configurations.each do |config|
+            config.build_settings['PUBLIC_HEADERS_FOLDER_PATH'].should.be.nil
+            config.build_settings['PRIVATE_HEADERS_FOLDER_PATH'].should.be.nil
+          end
+        end
+
+        it 'empties them for non-framework targets' do
+          @installer.install!
+          @project.targets.first.build_configurations.each do |config|
+            config.build_settings['PUBLIC_HEADERS_FOLDER_PATH'].should.be.empty
+            config.build_settings['PRIVATE_HEADERS_FOLDER_PATH'].should.be.empty
+          end
+        end
+      end
+
+      #--------------------------------------#
+
       it 'adds the source files of each pod to the target of the Pod library' do
         @installer.install!
         names = @installer.target.native_target.source_build_phase.files.map { |bf| bf.file_ref.display_name }
@@ -99,15 +116,6 @@ module Pod
       end
 
       #--------------------------------------#
-
-      it 'adds the resource bundle targets' do
-        @pod_target.file_accessors.first.stubs(:resource_bundles).returns('banana_bundle' => [])
-        @installer.install!
-        bundle_target = @project.targets.find { |t| t.name == 'Pods-BananaLib-banana_bundle' }
-        bundle_target.should.be.an.instance_of Xcodeproj::Project::Object::PBXNativeTarget
-        bundle_target.product_reference.name.should == 'banana_bundle.bundle'
-        bundle_target.product_reference.path.should == 'banana_bundle.bundle'
-      end
 
       it 'adds framework resources to the framework target' do
         @pod_target.stubs(:requires_frameworks? => true)
@@ -118,14 +126,91 @@ module Pod
         resource.should.be.not.nil
       end
 
-      it 'adds the build configurations to the resources bundle targets' do
-        @pod_target.file_accessors.first.stubs(:resource_bundles).returns('banana_bundle' => [])
-        @installer.install!
-        bundle_target = @project.targets.find { |t| t.name == 'Pods-BananaLib-banana_bundle' }
+      #--------------------------------------#
 
-        file = config.sandbox.root + @pod_target.xcconfig_private_path
-        bundle_target.build_configurations.each do |bc|
-          bc.base_configuration_reference.real_path.should == file
+      describe 'with a scoped pod target' do
+        before do
+          @pod_target = @pod_target.scoped.first
+          @installer = Installer::PodTargetInstaller.new(config.sandbox, @pod_target)
+        end
+
+        it 'adds file references for the support files of the target' do
+          @installer.install!
+          group = @project['Pods/BananaLib/Support Files']
+          group.children.map(&:display_name).sort.should == [
+            'Pods-BananaLib-dummy.m',
+            'Pods-BananaLib-prefix.pch',
+            'Pods-BananaLib.xcconfig',
+          ]
+        end
+
+        it 'adds the target for the static library to the project' do
+          @installer.install!
+          @project.targets.count.should == 1
+          @project.targets.first.name.should == 'Pods-BananaLib'
+        end
+
+        it 'adds the resource bundle targets' do
+          @pod_target.file_accessors.first.stubs(:resource_bundles).returns('banana_bundle' => [])
+          @installer.install!
+          bundle_target = @project.targets.find { |t| t.name == 'Pods-BananaLib-banana_bundle' }
+          bundle_target.should.be.an.instance_of Xcodeproj::Project::Object::PBXNativeTarget
+          bundle_target.product_reference.name.should == 'banana_bundle.bundle'
+          bundle_target.product_reference.path.should == 'banana_bundle.bundle'
+          bundle_target.platform_name.should == :ios
+          bundle_target.deployment_target.should == '4.3'
+        end
+
+        it 'adds the build configurations to the resources bundle targets' do
+          @pod_target.file_accessors.first.stubs(:resource_bundles).returns('banana_bundle' => [])
+          @installer.install!
+          bundle_target = @project.targets.find { |t| t.name == 'Pods-BananaLib-banana_bundle' }
+
+          file = config.sandbox.root + @pod_target.xcconfig_path
+          bundle_target.build_configurations.each do |bc|
+            bc.base_configuration_reference.real_path.should == file
+          end
+        end
+      end
+
+      #--------------------------------------#
+
+      describe 'with an unscoped pod target' do
+        it 'adds file references for the support files of the target' do
+          @installer.install!
+          @project.support_files_group
+          group = @project['Pods/BananaLib/Support Files']
+          group.children.map(&:display_name).sort.should == [
+            'BananaLib-dummy.m',
+            'BananaLib-prefix.pch',
+            'BananaLib.xcconfig',
+          ]
+        end
+
+        it 'adds the target for the static library to the project' do
+          @installer.install!
+          @project.targets.count.should == 1
+          @project.targets.first.name.should == 'BananaLib'
+        end
+
+        it 'adds the resource bundle targets' do
+          @pod_target.file_accessors.first.stubs(:resource_bundles).returns('banana_bundle' => [])
+          @installer.install!
+          bundle_target = @project.targets.find { |t| t.name == 'BananaLib-banana_bundle' }
+          bundle_target.should.be.an.instance_of Xcodeproj::Project::Object::PBXNativeTarget
+          bundle_target.product_reference.name.should == 'banana_bundle.bundle'
+          bundle_target.product_reference.path.should == 'banana_bundle.bundle'
+        end
+
+        it 'adds the build configurations to the resources bundle targets' do
+          @pod_target.file_accessors.first.stubs(:resource_bundles).returns('banana_bundle' => [])
+          @installer.install!
+          bundle_target = @project.targets.find { |t| t.name == 'BananaLib-banana_bundle' }
+
+          file = config.sandbox.root + @pod_target.xcconfig_path
+          bundle_target.build_configurations.each do |bc|
+            bc.base_configuration_reference.real_path.should == file
+          end
         end
       end
 
@@ -133,7 +218,7 @@ module Pod
 
       it 'creates the xcconfig file' do
         @installer.install!
-        file = config.sandbox.root + @pod_target.xcconfig_private_path
+        file = config.sandbox.root + @pod_target.xcconfig_path
         xcconfig = Xcodeproj::Config.new(file)
         xcconfig.to_hash['PODS_ROOT'].should == '${SRCROOT}'
       end
@@ -141,15 +226,12 @@ module Pod
       it "creates a prefix header, including the contents of the specification's prefix header" do
         @spec.prefix_header_contents = '#import "BlocksKit.h"'
         @installer.install!
-        support_files_dir = config.sandbox.target_support_files_dir('Pods-BananaLib')
-        prefix_header = support_files_dir + 'Pods-BananaLib-prefix.pch'
-        generated = prefix_header.read
+        generated = @pod_target.prefix_header_path.read
         expected = <<-EOS.strip_heredoc
           #ifdef __OBJC__
           #import <UIKit/UIKit.h>
           #endif
 
-          #import "Pods-environment.h"
           #import "BlocksKit.h"
           #import <BananaTree/BananaTree.h>
         EOS
@@ -158,13 +240,12 @@ module Pod
 
       it 'creates a dummy source to ensure the compilation of libraries with only categories' do
         @installer.install!
+        dummy_source_basename = @pod_target.dummy_source_path.basename.to_s
         build_files = @installer.target.native_target.source_build_phase.files
-        build_file = build_files.find { |bf| bf.file_ref.display_name == 'Pods-BananaLib-dummy.m' }
+        build_file = build_files.find { |bf| bf.file_ref.display_name == dummy_source_basename }
         build_file.should.be.not.nil
-        build_file.file_ref.path.should == 'Pods-BananaLib-dummy.m'
-        support_files_dir = config.sandbox.target_support_files_dir('Pods-BananaLib')
-        dummy = support_files_dir + 'Pods-BananaLib-dummy.m'
-        dummy.read.should.include?('@interface PodsDummy_Pods')
+        build_file.file_ref.path.should == dummy_source_basename
+        @pod_target.dummy_source_path.read.should.include?('@interface PodsDummy_BananaLib')
       end
 
       #--------------------------------------------------------------------------------#
@@ -176,13 +257,77 @@ module Pod
       end
 
       #--------------------------------------------------------------------------------#
+
+      describe 'concerning header_mappings_dirs' do
+        before do
+          @project.add_pod_group('snake', fixture('snake'))
+
+          @pod_target = fixture_pod_target('snake/snake.podspec', @target_definition)
+          @pod_target.user_build_configurations = { 'Debug' => :debug, 'Release' => :release }
+          @pod_target.stubs(:requires_frameworks? => true)
+          group = @project.group_for_spec('snake')
+          @pod_target.file_accessors.first.source_files.each do |file|
+            @project.add_file_reference(file, group)
+          end
+          @installer.stubs(:target).returns(@pod_target)
+          @installer.install!
+        end
+
+        it 'creates custom copy files phases for framework pods' do
+          target = @project.native_targets.first
+          target.name.should == 'snake'
+
+          target.headers_build_phase.files.reject { |build_file| build_file.settings.nil? }.map(&:display_name).should == ['snake-umbrella.h']
+
+          copy_files_build_phases = target.copy_files_build_phases.sort_by(&:name)
+          copy_files_build_phases.map(&:name).should == [
+            'Copy . Public Headers',
+            'Copy A Public Headers',
+            'Copy B Public Headers',
+            'Copy C Public Headers',
+          ]
+
+          copy_files_build_phases.map(&:symbol_dst_subfolder_spec).should == Array.new(4, :products_directory)
+
+          copy_files_build_phases.map(&:dst_path).should == [
+            '$(PUBLIC_HEADERS_FOLDER_PATH)/.',
+            '$(PUBLIC_HEADERS_FOLDER_PATH)/A',
+            '$(PUBLIC_HEADERS_FOLDER_PATH)/B',
+            '$(PUBLIC_HEADERS_FOLDER_PATH)/C',
+          ]
+
+          copy_files_build_phases.map { |phase| phase.files_references.map(&:path) }.should == [
+            ['Code/snake.h'],
+            ['Code/A/Boa.h', 'Code/A/Garden.h', 'Code/A/Rattle.h'],
+            ['Code/B/Boa.h', 'Code/B/Garden.h', 'Code/B/Rattle.h'],
+            ['Code/C/Boa.h', 'Code/C/Garden.h', 'Code/C/Rattle.h'],
+          ]
+        end
+
+        it 'uses relative file paths to generate umbrella header' do
+          content = @pod_target.umbrella_header_path.read
+
+          content.should =~ %r{"A/Boa.h"}
+          content.should =~ %r{"A/Garden.h"}
+          content.should =~ %r{"A/Rattle.h"}
+          content.should =~ %r{"B/Boa.h"}
+          content.should =~ %r{"B/Garden.h"}
+          content.should =~ %r{"B/Rattle.h"}
+          content.should =~ %r{"C/Boa.h"}
+          content.should =~ %r{"C/Garden.h"}
+          content.should =~ %r{"C/Rattle.h"}
+        end
+      end
+
+      #--------------------------------------------------------------------------------#
+
       describe 'concerning compiler flags' do
         before do
           @spec = Pod::Spec.new
         end
 
         it 'flags should not be added to dtrace files' do
-          @installer.target.target_definition.stubs(:inhibits_warnings_for_pod?).returns(true)
+          @installer.target.target_definitions.first.stubs(:inhibits_warnings_for_pod?).returns(true)
           @installer.install!
 
           dtrace_files = @installer.target.native_target.source_build_phase.files.select do |sf|
@@ -194,7 +339,7 @@ module Pod
         end
 
         it 'adds -w per pod if target definition inhibits warnings for that pod' do
-          @installer.target.target_definition.stubs(:inhibits_warnings_for_pod?).returns(true)
+          @installer.target.target_definitions.first.stubs(:inhibits_warnings_for_pod?).returns(true)
           flags = @installer.send(:compiler_flags_for_consumer, @spec.consumer(:ios), true)
 
           flags.should.include?('-w')
@@ -206,15 +351,15 @@ module Pod
         end
 
         it 'adds -Xanalyzer -analyzer-disable-checker per pod' do
-          @installer.target.target_definition.stubs(:inhibits_warnings_for_pod?).returns(true)
+          @installer.target.target_definitions.first.stubs(:inhibits_warnings_for_pod?).returns(true)
           flags = @installer.send(:compiler_flags_for_consumer, @spec.consumer(:ios), true)
 
-          flags.should.include?('-Xanalyzer -analyzer-disable-checker')
+          flags.should.include?('-Xanalyzer -analyzer-disable-all-checks')
         end
 
         it "doesn't inhibit analyzer warnings by default" do
           flags = @installer.send(:compiler_flags_for_consumer, @spec.consumer(:ios), true)
-          flags.should.not.include?('-Xanalyzer -analyzer-disable-checker')
+          flags.should.not.include?('-Xanalyzer -analyzer-disable-all-checks')
         end
 
         describe 'concerning ARC before and after iOS 6.0 and OS X 10.8' do

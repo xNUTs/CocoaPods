@@ -17,6 +17,8 @@ module Pod
       #
       attr_reader :podfile_path
 
+      # Initialize a new instance
+      #
       # @param [String] name @see name
       # @param [Hash] params @see params
       # @param [String] podfile_path @see podfile_path
@@ -41,7 +43,7 @@ module Pod
 
       # Fetches the external source from the remote according to the params.
       #
-      # @param  [Sandbox] sandbox
+      # @param  [Sandbox] _sandbox
       #         the sandbox where the specification should be stored.
       #
       # @return [void]
@@ -58,6 +60,11 @@ module Pod
 
       protected
 
+      # Return the normalized path for a podspec for a relative declared path.
+      #
+      # @param  [String] declared_path
+      #         The path declared in the podfile.
+      #
       # @return [String] The uri of the podspec appending the name of the file
       #         and expanding it if necessary.
       #
@@ -134,17 +141,33 @@ module Pod
       # @return [void]
       #
       def store_podspec(sandbox, spec, json = false)
-        if spec.is_a? Pathname
-          spec = Specification.from_file(spec).to_pretty_json
-          json = true
-        elsif spec.is_a?(String) && !json
-          spec = Specification.from_string(spec, 'spec.podspec').to_pretty_json
-          json = true
-        elsif spec.is_a?(Specification)
-          spec = spec.to_pretty_json
-          json = true
+        case spec
+        when Pathname
+          spec = Specification.from_file(spec)
+        when String
+          path = "#{name}.podspec"
+          path << '.json' if json
+          spec = Specification.from_string(spec, path)
         end
-        sandbox.store_podspec(name, spec, true, json)
+        validate_podspec(spec)
+        sandbox.store_podspec(name, spec.to_pretty_json, true, true)
+      end
+
+      def validate_podspec(podspec)
+        validator = validator_for_podspec(podspec)
+        validator.quick = true
+        validator.allow_warnings = true
+        validator.ignore_public_only_results = true
+        Config.instance.with_changes(:silent => true) do
+          validator.validate
+        end
+        unless validator.validated?
+          raise Informative, "The `#{name}` pod failed to validate due to #{validator.failure_reason}:\n#{validator.results_message}"
+        end
+      end
+
+      def validator_for_podspec(podspec)
+        Validator.new(podspec, [])
       end
     end
   end

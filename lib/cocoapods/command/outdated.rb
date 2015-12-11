@@ -8,15 +8,8 @@ module Pod
         spec repos, not those from local/external sources or `:head` versions.
       DESC
 
-      def self.options
-        [['--no-repo-update', 'Skip running `pod repo update` before install']].concat(super)
-      end
-
-      def initialize(argv)
-        config.skip_repo_update = !argv.flag?('repo-update', !config.skip_repo_update)
-        super
-      end
-
+      # Run the command
+      #
       # @todo the command report new dependencies added to the Podfile as
       #       updates.
       #
@@ -24,9 +17,9 @@ module Pod
       #
       def run
         if updates.empty?
-          UI.puts 'No updates are available.'.yellow
+          UI.puts 'No pod updates are available.'.yellow
         else
-          UI.section 'The following updates are available:' do
+          UI.section 'The following pod updates are available:' do
             updates.each do |(name, from_version, matching_version, to_version)|
               UI.puts "- #{name} #{from_version} -> #{matching_version} " \
                 "(latest version #{to_version})"
@@ -96,7 +89,7 @@ module Pod
 
       def spec_sets
         @spec_sets ||= begin
-          analyzer.send(:update_repositories_if_needed)
+          analyzer.send(:update_repositories) unless config.skip_repo_update?
           aggregate = Source::Aggregate.new(analyzer.sources.map(&:repo))
           installed_pods.map do |pod_name|
             aggregate.search(Dependency.new(pod_name))

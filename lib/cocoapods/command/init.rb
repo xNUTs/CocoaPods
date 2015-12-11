@@ -57,10 +57,12 @@ module Pod
         podfile << "xcodeproj '#{@project_path}'\n\n" if @project_path
         podfile << <<-PLATFORM.strip_heredoc
           # Uncomment this line to define a global platform for your project
-          # platform :ios, '6.0'
+          # platform :ios, '8.0'
+          # Uncomment this line if you're using Swift
+          # use_frameworks!
         PLATFORM
 
-        project.targets.each do |target|
+        project.native_targets.each do |target|
           podfile << target_module(target)
         end
         podfile << "\n"

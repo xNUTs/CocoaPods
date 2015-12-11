@@ -46,6 +46,7 @@ module Pod
           @root + 'Classes/Banana.m',
           @root + 'Classes/BananaPrivate.h',
           @root + 'Classes/BananaTrace.d',
+          @root + 'framework/Source/MoreBanana.h',
         ]
       end
 
@@ -55,6 +56,7 @@ module Pod
           @root + 'Classes/Banana.m',
           @root + 'Classes/BananaPrivate.h',
           @root + 'Classes/BananaTrace.d',
+          @root + 'framework/Source/MoreBanana.h',
         ]
       end
 
@@ -66,12 +68,14 @@ module Pod
         @accessor.headers.sort.should == [
           @root + 'Classes/Banana.h',
           @root + 'Classes/BananaPrivate.h',
+          @root + 'framework/Source/MoreBanana.h',
         ]
       end
 
       it 'returns the public headers' do
         @accessor.public_headers.sort.should == [
           @root + 'Classes/Banana.h',
+          @root + 'framework/Source/MoreBanana.h',
         ]
       end
 
@@ -80,6 +84,7 @@ module Pod
         @accessor.public_headers.sort.should == [
           @root + 'Classes/Banana.h',
           @root + 'Classes/BananaPrivate.h',
+          @root + 'framework/Source/MoreBanana.h',
         ]
       end
 
@@ -88,13 +93,16 @@ module Pod
         @spec_consumer.stubs(:private_header_files).returns(['**/*Private*'])
         @accessor.public_headers.sort.should == [
           @root + 'Classes/Banana.h',
+          @root + 'framework/Source/MoreBanana.h',
         ]
       end
 
       it 'includes the vendored framework headers if requested' do
         @accessor.public_headers(true).sort.should == [
           @root + 'Bananalib.framework/Versions/A/Headers/Bananalib.h',
+          @root + 'Bananalib.framework/Versions/A/Headers/SubDir/SubBananalib.h',
           @root + 'Classes/Banana.h',
+          @root + 'framework/Source/MoreBanana.h',
         ]
       end
 
@@ -128,7 +136,13 @@ module Pod
       it 'returns the paths of the framework headers' do
         @accessor.vendored_frameworks_headers.should == [
           @root + 'Bananalib.framework/Versions/A/Headers/Bananalib.h',
+          @root + 'Bananalib.framework/Versions/A/Headers/SubDir/SubBananalib.h',
         ]
+      end
+
+      it 'handles when the framework headers directory does not exist' do
+        Pathname.any_instance.stubs(:directory?).returns(false)
+        FileAccessor.vendored_frameworks_headers_dir(@root + 'Bananalib.framework').should == @root + 'Bananalib.framework/Headers'
       end
 
       it 'returns the paths of the library files' do
@@ -155,6 +169,16 @@ module Pod
         @accessor.resource_bundle_files.should == resource_paths
       end
 
+      it 'takes into account exclude_files when creating the resource bundles of the pod' do
+        @spec_consumer.stubs(:exclude_files).returns(['**/*.png'])
+        @spec_consumer.stubs(:resource_bundles).returns('BananaLib' => 'Resources/*')
+        resource_paths = [
+          @root + 'Resources/Images.xcassets',
+          @root + 'Resources/sub_dir',
+        ]
+        @accessor.resource_bundles.should == { 'BananaLib' => resource_paths }
+      end
+
       it 'returns the prefix header of the specification' do
         @accessor.prefix_header.should == @root + 'Classes/BananaLib.pch'
       end
@@ -175,6 +199,7 @@ module Pod
           @root + 'Classes/Banana.h',
           @root + 'Classes/Banana.m',
           @root + 'Classes/BananaTrace.d',
+          @root + 'framework/Source/MoreBanana.h',
         ]
       end
 
@@ -198,6 +223,7 @@ module Pod
             @root + 'Classes/Banana.h',
             @root + 'Classes/BananaPrivate.h',
             @root + 'Classes/BananaTrace.d',
+            @root + 'framework/Source/MoreBanana.h',
           ]
         end
       end
@@ -208,10 +234,10 @@ module Pod
     describe 'Private helpers' do
       describe '#paths_for_attribute' do
         it 'takes into account dir patterns and excluded files' do
-          file_patterns = ['Classes/*.{h,m,d}', 'Vendor']
+          file_patterns = ['Classes/*.{h,m,d}', 'Vendor', 'framework/Source/*.h']
           options = {
             :exclude_patterns => ['Classes/**/osx/**/*', 'Resources/**/osx/**/*'],
-            :dir_pattern => '*{.m,.mm,.c,.cpp,.swift,.h,.hh,.hpp,.ipp,.tpp}',
+            :dir_pattern => '*{.m,.mm,.i,.c,.cc,.cxx,.cpp,.c++,.swift,.h,.hh,.hpp,.ipp,.tpp,.hxx,.def}',
             :include_dirs => false,
           }
           @spec.exclude_files = options[:exclude_patterns]

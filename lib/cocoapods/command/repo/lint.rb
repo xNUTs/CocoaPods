@@ -15,7 +15,9 @@ module Pod
         ]
 
         def self.options
-          [['--only-errors', 'Lint presents only the errors']].concat(super)
+          [
+            ['--only-errors', 'Lint presents only the errors'],
+          ].concat(super)
         end
 
         def initialize(argv)
@@ -24,6 +26,8 @@ module Pod
           super
         end
 
+        # Run the command
+        #
         # @todo Part of this logic needs to be ported to cocoapods-core so web
         #       services can validate the repo.
         #
@@ -31,15 +35,16 @@ module Pod
         #
         def run
           if @name
-            dirs = File.exist?(@name) ? [Pathname.new(@name)] : [dir]
+            sources = SourcesManager.sources([@name])
           else
-            dirs = config.repos_dir.children.select(&:directory?)
+            sources = SourcesManager.aggregate.sources
           end
-          dirs.each do |dir|
-            SourcesManager.check_version_information(dir)
-            UI.puts "\nLinting spec repo `#{dir.realpath.basename}`\n".yellow
 
-            validator = Source::HealthReporter.new(dir)
+          sources.each do |source|
+            SourcesManager.check_version_information(source.repo)
+            UI.puts "\nLinting spec repo `#{source.repo.basename}`\n".yellow
+
+            validator = Source::HealthReporter.new(source.repo)
             validator.pre_check do |_name, _version|
               UI.print '.'
             end

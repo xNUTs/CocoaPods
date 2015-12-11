@@ -41,6 +41,7 @@ require 'claide'
 require 'spec_helper/command'         # Allows to run Pod commands and returns their output.
 require 'spec_helper/fixture'         # Provides access to the fixtures and unpacks them if needed.
 require 'spec_helper/temporary_repos' # Allows to create and modify temporary spec repositories.
+require 'spec_helper/temporary_cache' # Allows to create temporary cache directory.
 require 'spec_helper/user_interface'  # Redirects UI to UI.output & UI.warnings.
 require 'spec_helper/pre_flight'      # Cleans the temporary directory, the config & the UI.output before every test.
 
@@ -69,7 +70,7 @@ end
 #-----------------------------------------------------------------------------#
 
 ENV['SKIP_SETUP'] = 'true'
-if ENV['SKIP_XCODEBUILD'].nil? && `which xcodebuild`.strip.empty?
+if ENV['SKIP_XCODEBUILD'].nil? && Pod::Executable.which('xcodebuild').nil?
   ENV['SKIP_XCODEBUILD'] = 'true'
 end
 
@@ -108,36 +109,31 @@ def fixture_spec(name)
   Pod::Specification.from_file(file)
 end
 
-def fixture_file_accessor(name, platform = :ios)
-  file = SpecHelper::Fixture.fixture(name)
-  spec = Pod::Specification.from_file(file)
-  path_list = Pod::Sandbox::PathList.new(file.dirname)
+def fixture_file_accessor(spec_or_name, platform = Pod::Platform.ios)
+  spec = spec_or_name.is_a?(Pod::Specification) ? spec_or_name : fixture_spec(spec_or_name)
+  path_list = Pod::Sandbox::PathList.new(spec.defined_in_file.dirname)
   Pod::Sandbox::FileAccessor.new(path_list, spec.consumer(platform))
 end
 
-def fixture_target_definition(podfile = nil, &block)
-  podfile ||= Pod::Podfile.new(&block)
-  Pod::Podfile::TargetDefinition.new('Pods', podfile)
+def fixture_target_definition(name = 'Pods', platform = Pod::Platform.ios)
+  Pod::Podfile::TargetDefinition.new(name, Pod::Podfile.new, 'name' => name, 'platform' => platform)
 end
 
-def fixture_pod_target(spec_or_name, platform = :ios, target_definition = nil)
+def fixture_pod_target(spec_or_name, target_definition = nil)
   spec = spec_or_name.is_a?(Pod::Specification) ? spec_or_name : fixture_spec(spec_or_name)
   target_definition ||= fixture_target_definition
   target_definition.store_pod(spec.name)
-  Pod::PodTarget.new([spec], target_definition, config.sandbox).tap do |pod_target|
-    pod_target.stubs(:platform).returns(platform)
-    pod_target.file_accessors << fixture_file_accessor(spec.defined_in_file, platform)
-    consumer = spec.consumer(platform)
+  Pod::PodTarget.new([spec], [target_definition], config.sandbox).tap do |pod_target|
+    pod_target.file_accessors << fixture_file_accessor(spec, pod_target.platform)
+    consumer = spec.consumer(pod_target.platform)
     pod_target.spec_consumers << consumer
   end
 end
 
-def fixture_aggregate_target(pod_targets = [], platform = :ios, target_definition = nil)
-  target_definition ||= pod_targets.map(&:target_definition).first || fixture_target_definition
+def fixture_aggregate_target(pod_targets = [], target_definition = nil)
+  target_definition ||= pod_targets.flat_map(&:target_definitions).first || fixture_target_definition
   target = Pod::AggregateTarget.new(target_definition, config.sandbox)
   target.client_root = config.sandbox.root.dirname
-  version ||= (platform == :ios ? '4.3' : '10.6')
-  target.stubs(:platform).returns(Pod::Platform.new(platform, version))
   target.pod_targets = pod_targets
   target
 end

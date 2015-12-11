@@ -19,10 +19,33 @@ module Pod
 
       :clean               => true,
       :integrate_targets   => true,
+      :deduplicate_targets => true,
+      :deterministic_uuids => ENV['COCOAPODS_DISABLE_DETERMINISTIC_UUIDS'].nil?,
+      :lock_pod_source     => true,
       :new_version_message => ENV['COCOAPODS_SKIP_UPDATE_MESSAGE'].nil?,
 
       :cache_root          => Pathname.new(Dir.home) + 'Library/Caches/CocoaPods',
     }
+
+    # Applies the given changes to the config for the duration of the given
+    # block.
+    #
+    # @param [Hash<#to_sym,Object>] changes
+    #        the changes to merge temporarily with the current config
+    #
+    # @yield [] is called while the changes are applied
+    #
+    def with_changes(changes)
+      old = {}
+      changes.keys.each do |key|
+        key = key.to_sym
+        old[key] = send(key) if respond_to?(key)
+      end
+      configure_with(changes)
+      yield if block_given?
+    ensure
+      configure_with(old)
+    end
 
     public
 
@@ -56,11 +79,28 @@ module Pod
     attr_accessor :clean
     alias_method :clean?, :clean
 
+    # @return [Bool] Whether the installer should remove write permissions for
+    #                installed pod source files after the installation.
+    #
+    attr_accessor :lock_pod_source
+    alias_method :lock_pod_source?, :lock_pod_source
+
     # @return [Bool] Whether CocoaPods should integrate a user target and build
     #         the workspace or just create the Pods project.
     #
     attr_accessor :integrate_targets
     alias_method :integrate_targets?, :integrate_targets
+
+    # @return [Bool] Whether CocoaPods should deduplicate pod targets.
+    #
+    attr_accessor :deduplicate_targets
+    alias_method :deduplicate_targets?, :deduplicate_targets
+
+    # @return [Bool] Whether CocoaPods should give the pods project
+    #                deterministic UUIDs.
+    #
+    attr_accessor :deterministic_uuids
+    alias_method :deterministic_uuids?, :deterministic_uuids
 
     # @return [Bool] Whether the installer should skip the repos update.
     #
@@ -234,7 +274,7 @@ module Pod
     # @return [Pathname] The file to use to cache the search data.
     #
     def search_index_file
-      cache_root + 'search_index.yaml'
+      cache_root + 'search_index.json'
     end
 
     private

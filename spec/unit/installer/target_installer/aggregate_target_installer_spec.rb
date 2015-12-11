@@ -24,11 +24,10 @@ module Pod
 
         @target = AggregateTarget.new(@target_definition, config.sandbox)
         @target.stubs(:platform).returns(Platform.new(:ios, '6.0'))
-        @target.user_project_path = config.sandbox.root + '../user_project.xcodeproj'
         @target.client_root = config.sandbox.root.dirname
         @target.user_build_configurations = { 'Debug' => :debug, 'Release' => :release, 'AppStore' => :release, 'Test' => :debug }
 
-        @pod_target = PodTarget.new([@spec], @target_definition, config.sandbox)
+        @pod_target = PodTarget.new([@spec], [@target_definition], config.sandbox)
         @pod_target.stubs(:platform).returns(Platform.new(:ios, '6.0'))
         @pod_target.user_build_configurations = @target.user_build_configurations
         @pod_target.file_accessors = [file_accessor]
@@ -47,7 +46,7 @@ module Pod
           'Pods-acknowledgements.markdown',
           'Pods-acknowledgements.plist',
           'Pods-dummy.m',
-          'Pods-environment.h',
+          'Pods-frameworks.sh',
           'Pods-resources.sh',
           'Pods.appstore.xcconfig',
           'Pods.debug.xcconfig',
@@ -85,7 +84,7 @@ module Pod
 
       it "adds the user's build configurations to the target" do
         @installer.install!
-        @project.targets.first.build_configurations.map(&:name).sort.should == %w(        AppStore Debug Release Test        )
+        @project.targets.first.build_configurations.map(&:name).sort.should == %w( AppStore Debug Release Test        )
       end
 
       it 'it creates different hash instances for the build settings of various build configurations' do
@@ -101,10 +100,24 @@ module Pod
         end
       end
 
+      it 'will be built as static library' do
+        @installer.install!
+        @installer.target.native_target.build_configurations.each do |config|
+          config.build_settings['MACH_O_TYPE'].should == 'staticlib'
+        end
+      end
+
       it 'will be skipped when installing' do
         @installer.install!
         @installer.target.native_target.build_configurations.each do |config|
           config.build_settings['SKIP_INSTALL'].should == 'YES'
+        end
+      end
+
+      it 'has a PRODUCT_BUNDLE_IDENTIFIER set' do
+        @installer.install!
+        @installer.target.native_target.build_configurations.each do |config|
+          config.build_settings['PRODUCT_BUNDLE_IDENTIFIER'].should == 'org.cocoapods.${PRODUCT_NAME:rfc1034identifier}'
         end
       end
 
@@ -115,17 +128,6 @@ module Pod
         file = config.sandbox.root + @target.xcconfig_path('Release')
         xcconfig = Xcodeproj::Config.new(file)
         xcconfig.to_hash['PODS_ROOT'].should == '${SRCROOT}/Pods'
-      end
-
-      it 'creates a header for the target which contains the information about the installed Pods' do
-        @installer.install!
-        support_files_dir = config.sandbox.target_support_files_dir('Pods')
-        file = support_files_dir + 'Pods-environment.h'
-        contents = file.read
-        contents.should.include?('#define COCOAPODS_POD_AVAILABLE_BananaLib')
-        contents.should.include?('#define COCOAPODS_VERSION_MAJOR_BananaLib 1')
-        contents.should.include?('#define COCOAPODS_VERSION_MINOR_BananaLib 0')
-        contents.should.include?('#define COCOAPODS_VERSION_PATCH_BananaLib 0')
       end
 
       it 'creates a bridge support file' do

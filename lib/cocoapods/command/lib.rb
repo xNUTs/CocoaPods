@@ -18,13 +18,20 @@ module Pod
 
         self.arguments = [
           CLAide::Argument.new('NAME', true),
-          CLAide::Argument.new('TEMPLATE_URL', false),
         ]
+
+        def self.options
+          [
+            ['--template-url=URL', 'The URL of the git repo containing a ' \
+                                  'compatible template'],
+          ].concat(super)
+        end
 
         def initialize(argv)
           @name = argv.shift_argument
-          @template_url = argv.shift_argument
+          @template_url = argv.option('template-url', TEMPLATE_REPO)
           super
+          @additional_args = argv.remainder!
         end
 
         def validate!
@@ -72,7 +79,7 @@ module Pod
           UI.section("Configuring #{@name} template.") do
             Dir.chdir(@name) do
               if File.exist?('configure')
-                system("./configure #{@name}")
+                system('./configure', @name, *@additional_args)
               else
                 UI.warn 'Template does not have a configure file.'
               end
@@ -108,16 +115,19 @@ module Pod
         DESC
 
         def self.options
-          [['--quick',       'Lint skips checks that would require to download and build the spec'],
-           ['--allow-warnings', 'Lint validates even if warnings are present'],
-           ['--subspec=NAME', 'Lint validates only the given subspec'],
-           ['--no-subspecs', 'Lint skips validation of subspecs'],
-           ['--no-clean', 'Lint leaves the build directory intact for inspection'],
-           ['--fail-fast', 'Lint stops on the first failing platform or subspec'],
-           ['--use-libraries', 'Lint uses static libraries to install the spec'],
-           ['--sources=https://github.com/artsy/Specs,master', 'The sources from which to pull dependant pods ' \
-            '(defaults to https://github.com/CocoaPods/Specs.git). '\
-            'Multiple sources must be comma-delimited.']].concat(super)
+          [
+            ['--quick', 'Lint skips checks that would require to download and build the spec'],
+            ['--allow-warnings', 'Lint validates even if warnings are present'],
+            ['--subspec=NAME', 'Lint validates only the given subspec'],
+            ['--no-subspecs', 'Lint skips validation of subspecs'],
+            ['--no-clean', 'Lint leaves the build directory intact for inspection'],
+            ['--fail-fast', 'Lint stops on the first failing platform or subspec'],
+            ['--use-libraries', 'Lint uses static libraries to install the spec'],
+            ['--sources=https://github.com/artsy/Specs,master', 'The sources from which to pull dependent pods ' \
+             '(defaults to https://github.com/CocoaPods/Specs.git). ' \
+             'Multiple sources must be comma-delimited.'],
+            ['--private', 'Lint skips checks that apply only to public specs'],
+          ].concat(super)
         end
 
         def initialize(argv)
@@ -129,6 +139,7 @@ module Pod
           @only_subspec    = argv.option('subspec')
           @use_frameworks  = !argv.flag?('use-libraries')
           @source_urls     = argv.option('sources', 'https://github.com/CocoaPods/Specs.git').split(',')
+          @private         = argv.flag?('private', false)
           @podspecs_paths  = argv.arguments!
           super
         end
@@ -149,10 +160,11 @@ module Pod
             validator.no_subspecs    = !@subspecs || @only_subspec
             validator.only_subspec   = @only_subspec
             validator.use_frameworks = @use_frameworks
+            validator.ignore_public_only_results = @private
             validator.validate
 
             unless @clean
-              UI.puts "Pods project available at `#{validator.validation_dir}/Pods/Pods.xcodeproj` for inspection."
+              UI.puts "Pods workspace available at `#{validator.validation_dir}/App.xcworkspace` for inspection."
               UI.puts
             end
             if validator.validated?
@@ -160,7 +172,7 @@ module Pod
             else
               spec_name = podspec
               spec_name = validator.spec.name if validator.spec
-              message = "#{spec_name} did not pass validation."
+              message = "#{spec_name} did not pass validation, due to #{validator.failure_reason}."
 
               if @clean
                 message << "\nYou can use the `--no-clean` option to inspect " \

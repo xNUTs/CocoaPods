@@ -15,16 +15,19 @@ module Pod
         ]
 
         def self.options
-          [['--quick', 'Lint skips checks that would require to download and build the spec'],
-           ['--allow-warnings', 'Lint validates even if warnings are present'],
-           ['--subspec=NAME', 'Lint validates only the given subspec'],
-           ['--no-subspecs', 'Lint skips validation of subspecs'],
-           ['--no-clean', 'Lint leaves the build directory intact for inspection'],
-           ['--fail-fast', 'Lint stops on the first failing platform or subspec'],
-           ['--use-libraries', 'Lint uses static libraries to install the spec'],
-           ['--sources=https://github.com/artsy/Specs,master', 'The sources from which to pull dependant pods ' \
-            '(defaults to https://github.com/CocoaPods/Specs.git). '\
-            'Multiple sources must be comma-delimited.']].concat(super)
+          [
+            ['--quick', 'Lint skips checks that would require to download and build the spec'],
+            ['--allow-warnings', 'Lint validates even if warnings are present'],
+            ['--subspec=NAME', 'Lint validates only the given subspec'],
+            ['--no-subspecs', 'Lint skips validation of subspecs'],
+            ['--no-clean', 'Lint leaves the build directory intact for inspection'],
+            ['--fail-fast', 'Lint stops on the first failing platform or subspec'],
+            ['--use-libraries', 'Lint uses static libraries to install the spec'],
+            ['--sources=https://github.com/artsy/Specs,master', 'The sources from which to pull dependent pods ' \
+             '(defaults to https://github.com/CocoaPods/Specs.git). ' \
+             'Multiple sources must be comma-delimited.'],
+            ['--private', 'Lint skips checks that apply only to public specs'],
+          ].concat(super)
         end
 
         def initialize(argv)
@@ -36,13 +39,14 @@ module Pod
           @only_subspec    = argv.option('subspec')
           @use_frameworks  = !argv.flag?('use-libraries')
           @source_urls     = argv.option('sources', 'https://github.com/CocoaPods/Specs.git').split(',')
+          @private         = argv.flag?('private', false)
           @podspecs_paths  = argv.arguments!
           super
         end
 
         def run
           UI.puts
-          invalid_count = 0
+          failure_reasons = []
           podspecs_to_lint.each do |podspec|
             validator                = Validator.new(podspec, @source_urls)
             validator.quick          = @quick
@@ -52,22 +56,29 @@ module Pod
             validator.no_subspecs    = !@subspecs || @only_subspec
             validator.only_subspec   = @only_subspec
             validator.use_frameworks = @use_frameworks
+            validator.ignore_public_only_results = @private
             validator.validate
-            invalid_count += 1 unless validator.validated?
+            failure_reasons << validator.failure_reason
 
             unless @clean
-              UI.puts "Pods project available at `#{validator.validation_dir}/Pods/Pods.xcodeproj` for inspection."
+              UI.puts "Pods workspace available at `#{validator.validation_dir}/App.xcworkspace` for inspection."
               UI.puts
             end
           end
 
           count = podspecs_to_lint.count
           UI.puts "Analyzed #{count} #{'podspec'.pluralize(count)}.\n\n"
-          if invalid_count == 0
+
+          failure_reasons.compact!
+          if failure_reasons.empty?
             lint_passed_message = count == 1 ? "#{podspecs_to_lint.first.basename} passed validation." : 'All the specs passed validation.'
             UI.puts lint_passed_message.green << "\n\n"
           else
-            raise Informative, count == 1 ? 'The spec did not pass validation.' : "#{invalid_count} out of #{count} specs failed validation."
+            raise Informative, if count == 1
+                                 "The spec did not pass validation, due to #{failure_reasons.first}."
+                               else
+                                 "#{failure_reasons.count} out of #{count} specs failed validation."
+                               end
           end
           podspecs_tmp_dir.rmtree if podspecs_tmp_dir.exist?
         end

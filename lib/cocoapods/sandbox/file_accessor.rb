@@ -8,7 +8,7 @@ module Pod
     #
     class FileAccessor
       HEADER_EXTENSIONS = Xcodeproj::Constants::HEADER_FILES_EXTENSIONS
-      SOURCE_FILE_EXTENSIONS = (%w(.m .mm .c .cpp .swift) + HEADER_EXTENSIONS).uniq.freeze
+      SOURCE_FILE_EXTENSIONS = (%w(.m .mm .i .c .cc .cxx .cpp .c++ .swift) + HEADER_EXTENSIONS).uniq.freeze
 
       GLOB_PATTERNS = {
         :readme              => 'readme{*,.*}'.freeze,
@@ -27,6 +27,8 @@ module Pod
       #
       attr_reader :spec_consumer
 
+      # Initialize a new instance
+      #
       # @param [Sandbox::PathList, Pathname] path_list @see path_list
       # @param [Specification::Consumer] spec_consumer @see spec_consumer
       #
@@ -150,13 +152,48 @@ module Pod
         paths_for_attribute(:vendored_frameworks, true)
       end
 
+      # @return [Array<Pathname>] The paths of the dynamic framework bundles
+      #         that come shipped with the Pod.
+      #
+      def vendored_dynamic_frameworks
+        vendored_frameworks.select do |framework|
+          dynamic_binary?(framework + framework.basename('.*'))
+        end
+      end
+
+      # @return [Array<Pathname>] The paths of the static (fake) framework
+      #         bundles that come shipped with the Pod.
+      #
+      def vendored_static_frameworks
+        vendored_frameworks - vendored_dynamic_frameworks
+      end
+
+      # @param  [Pathname] framework
+      #         The vendored framework to search into.
+      # @return [Pathname] The path of the header directory of the
+      #         vendored framework.
+      #
+      def self.vendored_frameworks_headers_dir(framework)
+        dir = framework + 'Headers'
+        dir.directory? ? dir.realpath : dir
+      end
+
+      # @param  [Pathname] framework
+      #         The vendored framework to search into.
+      # @return [Array<Pathname>] The paths of the headers included in the
+      #         vendored framework.
+      #
+      def self.vendored_frameworks_headers(framework)
+        headers_dir = vendored_frameworks_headers_dir(framework)
+        Pathname.glob(headers_dir + '**/' + GLOB_PATTERNS[:public_header_files])
+      end
+
       # @return [Array<Pathname>] The paths of the framework headers that come
       #         shipped with the Pod.
       #
       def vendored_frameworks_headers
         vendored_frameworks.map do |framework|
-          headers_dir = (framework + 'Headers').realpath
-          Pathname.glob(headers_dir + GLOB_PATTERNS[:public_header_files])
+          self.class.vendored_frameworks_headers(framework)
         end.flatten.uniq
       end
 
@@ -167,14 +204,46 @@ module Pod
         paths_for_attribute(:vendored_libraries)
       end
 
+      # @return [Array<Pathname>] The paths of the dynamic libraries
+      #         that come shipped with the Pod.
+      #
+      def vendored_dynamic_libraries
+        vendored_libraries.select do |library|
+          dynamic_binary?(library)
+        end
+      end
+
+      # @return [Array<Pathname>] The paths of the static libraries
+      #         that come shipped with the Pod.
+      #
+      def vendored_static_libraries
+        vendored_libraries - vendored_dynamic_libraries
+      end
+
+      # @return [Array<Pathname>] The paths of the dynamic binary artifacts
+      #         that come shipped with the Pod.
+      #
+      def vendored_dynamic_artifacts
+        vendored_dynamic_libraries + vendored_dynamic_frameworks
+      end
+
+      # @return [Array<Pathname>] The paths of the static binary artifacts
+      #         that come shipped with the Pod.
+      #
+      def vendored_static_artifacts
+        vendored_static_libraries + vendored_static_frameworks
+      end
+
       # @return [Hash{String => Array<Pathname>}] A hash that describes the
-      #         resource bundles of the Pod. The keys reppresent the name of
+      #         resource bundles of the Pod. The keys represent the name of
       #         the bundle while the values the path of the resources.
       #
       def resource_bundles
         result = {}
         spec_consumer.resource_bundles.each do |name, file_patterns|
-          paths = expanded_paths(file_patterns, :include_dirs => true)
+          paths = expanded_paths(file_patterns,
+                                 :exclude_patterns => spec_consumer.exclude_files,
+                                 :include_dirs => true)
           result[name] = paths
         end
         result
@@ -293,6 +362,17 @@ module Pod
         result = []
         result << path_list.glob(patterns, options)
         result.flatten.compact.uniq
+      end
+
+      # @param  [Pathname] binary
+      #         The file to be checked for being a dynamic Mach-O binary.
+      #
+      # @return [Boolean] Whether `binary` can be dynamically linked.
+      #
+      def dynamic_binary?(binary)
+        return unless binary.file?
+        output, status = Executable.capture_command('file', [binary], :capture => :out)
+        status.success? && output =~ /dynamically linked/
       end
 
       #-----------------------------------------------------------------------#

@@ -3,10 +3,17 @@ module Pod
   # of the single Pods. The client targets will then depend on this one.
   #
   class AggregateTarget < Target
+    # @return [TargetDefinition] the target definition of the Podfile that
+    #         generated this target.
+    attr_reader :target_definition
+
+    # Initialize a new instance
+    #
     # @param [TargetDefinition] target_definition @see target_definition
     # @param [Sandbox] sandbox @see sandbox
     #
     def initialize(target_definition, sandbox)
+      super()
       @target_definition = target_definition
       @sandbox = sandbox
       @pod_targets = []
@@ -28,6 +35,18 @@ module Pod
       c99ext_identifier(label)
     end
 
+    # @return [Platform] the platform for this target.
+    #
+    def platform
+      @platform ||= target_definition.platform
+    end
+
+    # @return [Podfile] The podfile which declares the dependency
+    #
+    def podfile
+      target_definition.podfile
+    end
+
     # @return [Pathname] the folder where the client is stored used for
     #         computing the relative paths. If integrating it should be the
     #         folder where the user project is stored, otherwise it should
@@ -35,13 +54,17 @@ module Pod
     #
     attr_accessor :client_root
 
+    # @return [Xcodeproj::Project] the user project that this target will
+    #         integrate as identified by the analyzer.
+    #
+    attr_accessor :user_project
+
     # @return [Pathname] the path of the user project that this target will
     #         integrate as identified by the analyzer.
     #
-    # @note   The project instance is not stored to prevent editing different
-    #         instances.
-    #
-    attr_accessor :user_project_path
+    def user_project_path
+      user_project.path if user_project
+    end
 
     # @return [Array<String>] the list of the UUIDs of the user targets that
     #         will be integrated by this target as identified by the analyzer.
@@ -51,14 +74,14 @@ module Pod
     #
     attr_accessor :user_target_uuids
 
-    # @return [Array<PBXNativeTarget>] The list of all the user targets that
-    #         will be integrated by this target.
+    # List all user targets that will be integrated by this #target.
     #
-    def user_targets(project = nil)
-      return [] unless user_project_path
-      project ||= Xcodeproj::Project.open(user_project_path)
+    # @return [Array<PBXNativeTarget>]
+    #
+    def user_targets
+      return [] unless user_project
       user_target_uuids.map do |uuid|
-        native_target = project.objects_by_uuid[uuid]
+        native_target = user_project.objects_by_uuid[uuid]
         unless native_target
           raise Informative, '[Bug] Unable to find the target with ' \
             "the `#{uuid}` UUID for the `#{self}` integration library"
@@ -88,7 +111,7 @@ module Pod
     #
     def pod_targets_for_build_configuration(build_configuration)
       pod_targets.select do |pod_target|
-        pod_target.include_in_build_config?(build_configuration)
+        pod_target.include_in_build_config?(target_definition, build_configuration)
       end
     end
 
@@ -174,6 +197,13 @@ module Pod
     #
     def embed_frameworks_script_relative_path
       "${SRCROOT}/#{relative_to_srcroot(embed_frameworks_script_path)}"
+    end
+
+    # @return [String] The scoped configuration build dir, relevant if the
+    #         target is integrated as framework.
+    #
+    def scoped_configuration_build_dir
+      "$(BUILD_DIR)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)/#{target_definition.label}"
     end
 
     private

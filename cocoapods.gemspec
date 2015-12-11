@@ -27,22 +27,26 @@ Gem::Specification.new do |s|
   s.require_paths = %w{ lib }
 
   # Link with the version of CocoaPods-Core
-  s.add_runtime_dependency 'cocoapods-core',       "= #{Pod::VERSION}"
-  s.add_runtime_dependency 'claide',               '~> 0.8.1'
-  s.add_runtime_dependency 'xcodeproj',            '~> 0.24.1'
-  s.add_runtime_dependency 'cocoapods-downloader', '~> 0.9.0'
-  s.add_runtime_dependency 'cocoapods-plugins',    '~> 0.4.2'
-  s.add_runtime_dependency 'cocoapods-try',        '~> 0.4.3'
-  s.add_runtime_dependency 'cocoapods-trunk',      '~> 0.6.0'
-  s.add_runtime_dependency 'molinillo',            '~> 0.2.3'
+  s.add_runtime_dependency 'cocoapods-core',        "= #{Pod::VERSION}"
+
+  s.add_runtime_dependency 'claide',                '~> 0.9.1'
+  s.add_runtime_dependency 'cocoapods-deintegrate', '~> 0.2.1'
+  s.add_runtime_dependency 'cocoapods-downloader',  '~> 0.9.3'
+  s.add_runtime_dependency 'cocoapods-plugins',     '~> 0.4.2'
+  s.add_runtime_dependency 'cocoapods-search',      '~> 0.1.0'
+  s.add_runtime_dependency 'cocoapods-stats',       '~> 0.6.2'
+  s.add_runtime_dependency 'cocoapods-trunk',       '~> 0.6.4'
+  s.add_runtime_dependency 'cocoapods-try',         '~> 0.5.1'
+  s.add_runtime_dependency 'molinillo',             '~> 0.4.0'
+  s.add_runtime_dependency 'xcodeproj',             '~> 0.28.2'
 
   s.add_runtime_dependency 'colored',       '~> 1.2'
   s.add_runtime_dependency 'escape',        '~> 0.0.4'
-  s.add_runtime_dependency 'activesupport', '>= 3.2.15'
-  s.add_runtime_dependency 'nap',           '~> 0.8'
+  s.add_runtime_dependency 'activesupport', '>= 4.0.2'
+  s.add_runtime_dependency 'nap',           '~> 1.0'
 
   s.add_development_dependency 'bundler', '~> 1.3'
-  s.add_development_dependency 'rake'
+  s.add_development_dependency 'rake', '~> 10.0'
   s.add_development_dependency 'bacon', '~> 1.1'
 
   ## Make sure you can build the gem on older versions of RubyGems too:

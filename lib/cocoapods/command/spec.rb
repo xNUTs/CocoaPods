@@ -30,23 +30,6 @@ module Pod
         help! 'A valid regular expression is required.'
       end
 
-      # @return [Fixnum] the index of the chosen array item
-      #
-      def choose_from_array(array, message)
-        array.each_with_index do |item, index|
-          UI.puts "#{ index + 1 }: #{ item }"
-        end
-
-        UI.puts message
-
-        index = UI.gets.chomp.to_i - 1
-        if index < 0 || index > array.count - 1
-          raise Informative, "#{ index + 1 } is invalid [1-#{ array.count }]"
-        else
-          index
-        end
-      end
-
       # @param  [String] spec
       #         The name of the specification.
       #
@@ -65,7 +48,7 @@ module Pod
           set = sets.find { |s| s.name == spec }
         else
           names = sets.map(&:name) * ', '
-          raise Informative, "More than one spec found for '#{ spec }':\n#{ names }"
+          raise Informative, "More than one spec found for '#{spec}':\n#{names}"
         end
 
         unless show_all
@@ -94,7 +77,7 @@ module Pod
 
           versions.each do |version|
             spec = source.specification(set.name, version)
-            paths += "#{ pathname_from_spec(spec, source) }\n"
+            paths += "#{pathname_from_spec(spec, source)}\n"
           end
         end
 
@@ -119,7 +102,7 @@ module Pod
         end
 
         if !best_source || !best_version
-          raise Informative, "Unable to locate highest known specification for `#{ set.name }'"
+          raise Informative, "Unable to locate highest known specification for `#{set.name}'"
         end
 
         [best_source.specification(set.name, best_version), best_source]

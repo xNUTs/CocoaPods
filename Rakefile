@@ -31,6 +31,7 @@ begin
   end
 
   require 'bundler/gem_tasks'
+  require 'bundler/setup'
 
   # Pre release
   #-----------------------------------------------------------------------------#
@@ -54,7 +55,7 @@ begin
       sh "git checkout #{specs_branch}"
       sh 'git pull'
 
-      yaml_file  = 'CocoaPods-version.yml'
+      yaml_file = 'CocoaPods-version.yml'
       unless File.exist?(yaml_file)
         $stderr.puts red("[!] Unable to find #{yaml_file}!")
         exit 1
@@ -127,6 +128,8 @@ begin
     # to be run separately.
     #
     task :all => 'fixture_tarballs:unpack' do
+      # Forcing colored to be included on String before Term::ANSIColor, so that Inch will work correctly.
+      require 'colored'
       ENV['GENERATE_COVERAGE'] = 'true'
       puts "\033[0;32mUsing #{`ruby --version`}\033[0m"
 
@@ -141,6 +144,9 @@ begin
 
       title 'Running RuboCop'
       Rake::Task['rubocop'].invoke
+
+      title 'Running Inch'
+      Rake::Task['inch'].invoke
     end
 
     namespace :fixture_tarballs do
@@ -197,8 +203,7 @@ begin
       title 'Running Integration tests'
       sh 'rm -rf spec/cocoapods-integration-specs/tmp'
       title 'Building all the fixtures'
-      puts `bundle exec bacon spec/integration.rb`
-
+      sh('bundle exec bacon spec/integration.rb') {}
       title 'Storing fixtures'
       # Copy the files to the files produced by the specs to the after folders
       FileList['tmp/*'].each do |source|
@@ -246,6 +251,7 @@ begin
       Bundler.require 'xcodeproj', :development
       Dir['examples/*'].each do |dir|
         Dir.chdir(dir) do
+          next if dir == 'examples/watchOS Example'
           puts "Example: #{dir}"
 
           puts '    Installing Pods'
@@ -295,6 +301,11 @@ begin
     sh 'bundle exec rubocop lib spec Rakefile'
   end
 
+  #-- Inch -------------------------------------------------------------------#
+
+  require 'inch_by_inch/rake_task'
+  InchByInch::RakeTask.new
+
 rescue LoadError, NameError => e
   $stderr.puts "\033[0;31m" \
     '[!] Some Rake tasks haven been disabled because the environment' \
@@ -331,6 +342,10 @@ def title(title)
   puts cyan_title
   puts '-' * 80
   puts
+end
+
+def green(string)
+  "\033[0;32m#{string}\e[0m"
 end
 
 def red(string)

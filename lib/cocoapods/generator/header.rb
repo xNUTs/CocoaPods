@@ -19,6 +19,8 @@ module Pod
       #
       attr_accessor :module_imports
 
+      # Initialize a new instance
+      #
       # @param  [Symbol] platform
       #         @see platform
       #
@@ -80,7 +82,12 @@ module Pod
       # @return [String]
       #
       def generate_platform_import_header
-        "#import #{platform == :ios ? '<UIKit/UIKit.h>' : '<Cocoa/Cocoa.h>'}\n"
+        case platform.name
+        when :ios then "#import <UIKit/UIKit.h>\n"
+        when :tvos then "#import <UIKit/UIKit.h>\n"
+        when :osx then "#import <Cocoa/Cocoa.h>\n"
+        else "#import <Foundation/Foundation.h>\n"
+        end
       end
     end
   end

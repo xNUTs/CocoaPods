@@ -33,14 +33,16 @@ module Pod
       #
       attr_reader :installation_root
 
-      # @return [Array<Target>] the targets represented in the Podfile.
+      # @return [Array<AggregateTarget>] the targets represented in the Podfile.
       #
       attr_reader :targets
 
+      # Init a new UserProjectIntegrator
+      #
       # @param  [Podfile]  podfile @see #podfile
       # @param  [Sandbox]  sandbox @see #sandbox
       # @param  [Pathname] installation_root @see #installation_root
-      # @param  [Library]  libraries @see #libraries
+      # @param  [Array<AggregateTarget>]  targets @see #targets
       #
       # @todo   Too many initialization arguments
       #
@@ -61,6 +63,7 @@ module Pod
         integrate_user_targets
         warn_about_empty_podfile
         warn_about_xcconfig_overrides
+        save_projects
       end
 
       #-----------------------------------------------------------------------#
@@ -89,7 +92,7 @@ module Pod
           workspace = Xcodeproj::Workspace.new_from_xcworkspace(workspace_path)
           new_file_references = file_references - workspace.file_references
           unless new_file_references.empty?
-            workspace.file_references.concat(new_file_references)
+            new_file_references.each { |fr| workspace << fr }
             workspace.save_as(workspace_path)
           end
 
@@ -110,8 +113,42 @@ module Pod
       # @return [void]
       #
       def integrate_user_targets
-        targets_to_integrate.sort_by(&:name).each do |target|
-          TargetIntegrator.new(target).integrate!
+        target_integrators = targets_to_integrate.sort_by(&:name).map do |target|
+          TargetIntegrator.new(target)
+        end
+
+        Config.instance.with_changes(:silent => true) do
+          deintegrator = Deintegrator.new
+          all_project_targets = user_projects.flat_map(&:native_targets).uniq
+          all_native_targets = targets_to_integrate.flat_map(&:user_targets).uniq
+          targets_to_deintegrate = all_project_targets - all_native_targets
+          targets_to_deintegrate.each do |target|
+            deintegrator.deintegrate_target(target)
+          end
+        end
+
+        target_integrators.each(&:integrate!)
+      end
+
+      # Save all user projects.
+      #
+      # @return [void]
+      #
+      def save_projects
+        user_projects.each do |project|
+          if project.dirty?
+            project.save
+          else
+            # There is a bug in Xcode where the process of deleting and
+            # re-creating the xcconfig files used in the build
+            # configuration cause building the user project to fail until
+            # Xcode is relaunched.
+            #
+            # Touching/saving the project causes Xcode to reload these.
+            #
+            # https://github.com/CocoaPods/CocoaPods/issues/2665
+            FileUtils.touch(project.path + 'project.pbxproj')
+          end
         end
       end
 
@@ -190,6 +227,10 @@ module Pod
       #
       def user_project_paths
         targets.map(&:user_project_path).compact.uniq
+      end
+
+      def user_projects
+        targets.map(&:user_project).compact.uniq
       end
 
       def targets_to_integrate

@@ -45,13 +45,13 @@ module Pod
         path = temporary_directory + 'Bananas.podspec'
         spec = Specification.from_file(path)
 
-        spec.name.should         == 'Bananas'
-        spec.license.should      == { :type => 'MIT (example)' }
-        spec.version.should      == Version.new('0.0.1')
-        spec.summary.should      == 'A short description of Bananas.'
-        spec.homepage.should     == 'http://EXAMPLE/Bananas'
-        spec.authors.should      == { `git config --get user.name`.strip => `git config --get user.email`.strip }
-        spec.source.should       == { :git => 'http://EXAMPLE/Bananas.git', :tag => '0.0.1' }
+        spec.name.should == 'Bananas'
+        spec.license.should == { :type => 'MIT (example)' }
+        spec.version.should == Version.new('0.0.1')
+        spec.summary.should == 'A short description of Bananas.'
+        spec.homepage.should == 'http://EXAMPLE/Bananas'
+        spec.authors.should == { `git config --get user.name`.strip => `git config --get user.email`.strip }
+        spec.source.should == { :git => 'http://EXAMPLE/Bananas.git', :tag => '0.0.1' }
         spec.consumer(:ios).source_files.should == ['Classes', 'Classes/**/*.{h,m}']
         spec.consumer(:ios).public_header_files.should == []
       end
@@ -70,13 +70,13 @@ module Pod
         run_command('spec', 'create', 'https://github.com/lukeredpath/libPusher.git')
         path = temporary_directory + 'libPusher.podspec'
         spec = Specification.from_file(path)
-        spec.name.should     == 'libPusher'
-        spec.license.should  == { :type => 'MIT (example)' }
-        spec.version.should  == Version.new('1.4')
-        spec.summary.should  == 'An Objective-C interface to Pusher (pusherapp.com)'
+        spec.name.should == 'libPusher'
+        spec.license.should == { :type => 'MIT (example)' }
+        spec.version.should == Version.new('1.4')
+        spec.summary.should == 'An Objective-C interface to Pusher (pusherapp.com)'
         spec.homepage.should == 'https://github.com/lukeredpath/libPusher'
-        spec.authors.should  == { 'Luke Redpath' => 'luke@lukeredpath.co.uk' }
-        spec.source.should   == { :git => 'https://github.com/lukeredpath/libPusher.git', :tag => 'v1.4' }
+        spec.authors.should == { 'Luke Redpath' => 'luke@lukeredpath.co.uk' }
+        spec.source.should == { :git => 'https://github.com/lukeredpath/libPusher.git', :tag => 'v1.4' }
       end
 
       it 'accepts a name when creating a podspec form github' do
@@ -93,7 +93,7 @@ module Pod
         run_command('spec', 'create', 'other_name', 'https://github.com/lukeredpath/libPusher.git')
         path = temporary_directory + 'other_name.podspec'
         spec = Specification.from_file(path)
-        spec.name.should     == 'other_name'
+        spec.name.should == 'other_name'
         spec.homepage.should == 'https://github.com/lukeredpath/libPusher'
       end
 
@@ -113,7 +113,45 @@ module Pod
         path = temporary_directory + 'libPusher.podspec'
         spec = Specification.from_file(path)
         spec.version.should == Version.new('0.0.1')
-        spec.source.should  == { :git => 'https://github.com/lukeredpath/libPusher.git', :commit => '5f482b0693ac2ac1ad85d1aabc27ec7547cc0bc7' }
+        spec.source.should == { :git => 'https://github.com/lukeredpath/libPusher.git', :commit => '5f482b0693ac2ac1ad85d1aabc27ec7547cc0bc7' }
+      end
+
+      it 'correctly reuses version variable in source if matching tag is found on github' do
+        repo = {
+          'name' => 'libPusher',
+          'owner' => { 'login' => 'lukeredpath' },
+          'html_url' => 'https://github.com/lukeredpath/libPusher',
+          'description' => 'An Objective-C interface to Pusher (pusherapp.com)',
+          'clone_url' => 'https://github.com/lukeredpath/libPusher.git',
+        }
+        GitHub.expects(:repo).with('lukeredpath/libPusher').returns(repo)
+        GitHub.expects(:tags).with('https://github.com/lukeredpath/libPusher').returns([{ 'name' => '1.4.0' }])
+        GitHub.expects(:user).with('lukeredpath').returns('name' => 'Luke Redpath', 'email' => 'luke@lukeredpath.co.uk')
+        run_command('spec', 'create', 'https://github.com/lukeredpath/libPusher.git')
+        path = temporary_directory + 'libPusher.podspec'
+        spec = Specification.from_file(path)
+        spec.version.should == Version.new('1.4.0')
+        spec.source.should == { :git => 'https://github.com/lukeredpath/libPusher.git', :tag => '1.4.0' }
+        File.open(path, 'r') { |f| f.read.should.include ':tag => "#{s.version}"' }
+      end
+
+      it 'correctly reuses version variable in source if matching tag with prefix is found on github' do
+        repo = {
+          'name' => 'libPusher',
+          'owner' => { 'login' => 'lukeredpath' },
+          'html_url' => 'https://github.com/lukeredpath/libPusher',
+          'description' => 'An Objective-C interface to Pusher (pusherapp.com)',
+          'clone_url' => 'https://github.com/lukeredpath/libPusher.git',
+        }
+        GitHub.expects(:repo).with('lukeredpath/libPusher').returns(repo)
+        GitHub.expects(:tags).with('https://github.com/lukeredpath/libPusher').returns([{ 'name' => 'v1.4.0' }])
+        GitHub.expects(:user).with('lukeredpath').returns('name' => 'Luke Redpath', 'email' => 'luke@lukeredpath.co.uk')
+        run_command('spec', 'create', 'https://github.com/lukeredpath/libPusher.git')
+        path = temporary_directory + 'libPusher.podspec'
+        spec = Specification.from_file(path)
+        spec.version.should == Version.new('1.4.0')
+        spec.source.should == { :git => 'https://github.com/lukeredpath/libPusher.git', :tag => 'v1.4.0' }
+        File.open(path, 'r') { |f| f.read.should.include ':tag => "v#{s.version}"' }
       end
 
       it "raises an informative message when the GitHub repository doesn't have any commits" do
@@ -197,8 +235,10 @@ module Pod
 
       it 'lints a given podspec' do
         cmd = command('spec', 'lint', '--quick', @spec_path)
-        lambda { cmd.run }.should.raise Informative
+        exception = lambda { cmd.run }.should.raise Informative
         UI.output.should.include 'Missing license type'
+        exception.message.should.match /due to 1 warning /
+        exception.message.should.match /use `--allow-warnings` to ignore it\)/
       end
 
       it 'respects the --allow-warnings option' do
@@ -360,22 +400,6 @@ module Pod
         it 'returns the path of the specification with the given name' do
           path = @command.send(:get_path_of_spec, 'AFNetworking')
           path.should == fixture('spec-repos') + 'master/Specs/AFNetworking/2.4.1/AFNetworking.podspec.json'
-        end
-      end
-
-      describe '#choose_from_array' do
-        it 'should return a valid index for the given array' do
-          UI.next_input = "1\n"
-          index = @command.send(:choose_from_array, %w(item1 item2 item3), 'A message')
-          UI.output.should.include "1: item1\n2: item2\n3: item3\nA message\n"
-          index.should == 0
-        end
-
-        it 'should raise when the index is out of bounds' do
-          UI.next_input = "4\n"
-          lambda { @command.send(:choose_from_array, %w(item1 item2 item3), 'A message') }.should.raise Pod::Informative
-          UI.next_input = "0\n"
-          lambda { @command.send(:choose_from_array, %w(item1 item2 item3), 'A message') }.should.raise Pod::Informative
         end
       end
     end
